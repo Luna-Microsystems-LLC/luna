@@ -36,7 +36,9 @@ local errors = {
     [4] = "String not terminated by null char",
     [5] = "Comment is not closed",
     [6] = "Function is not closed",
-    [7] = "Invalid preprocessor argument"
+    [7] = "Invalid preprocessor argument",
+    [8] = "Invalid number",
+    [9] = "[ expected"
 }
 
 local outbuffer = ""
@@ -361,6 +363,34 @@ compile = function(text, args)
         writeToBuf(instructions.STN)
         writeToBuf(getRegisterFromName(tokens[2]))
         after = 3
+    elseif string.upper(tokens[1]) == "MBYTE" then
+        -- Syntax: mbyte 3000 [ hello world! ]
+        writeToBuf(instructions.MBYTE) 
+        tokens[2] = removeComma(tokens[2])
+        writeToBuf(getRegisterFromName(tokens[2]))
+        local _end = 0
+        if tokens[3] ~= "[" then
+            throwNew("error", 9)
+        end
+        local str = ""
+
+        local vtokens = {}
+        for i = 4, #tokens do
+            if tokens[i] == "]" then
+                _end = i
+                break
+            else
+                table.insert(vtokens, tokens[i])
+            end
+        end
+        str = table.concat(vtokens, ' ')
+
+        if _end == 0 then
+            throwNew("error", 10)
+        end
+
+        writeToBufRaw(str)
+        after = _end + 1
     elseif string.find(tokens[1], ":") and string.find(tokens[1], ":") == #tokens[1] then
         tokens[1] = string.gsub(tokens[1], ":", "")
         if string.find(tokens[1], ":") then

@@ -145,52 +145,27 @@ local function getValueFromRegister(addr)
 end
 
 local function _tonumber(number, silent)
-    -- Example: FFFF (1st is flag)
-    local digits = {}
+    local n = tonumber(number)
 
-    if not tonumber(number) then 
-        if silent ~= true then
+    if not n then
+        if not silent then
             print(debug.traceback()); print("[FATAL]: Invalid number")
             Dump()
             os.exit(1)
-        else
-            return nil
         end
+        return nil
     end
 
-    number = string.format("%04X", tonumber(number))
-    for i = 1, #number do
-        table.insert(digits, string.sub(number, i, i))
+    -- clamp to signed 16-bit range
+    if n > 0x7FFF then
+        n = n - 0x10000
+    elseif n < -0x8000 then
+        n = -0x8000
     end
 
-    if #digits > 4 then
-        print(debug.traceback()); print("[FATAL]: Integer representation too large")
-        Dump()
-        os.exit(1)
-    end
-
-    local neg
-
-    if digits[1] ~= "0" then
-        neg = true
-    else
-        neg = false
-    end
-
-    local reconstruct = "0x"
-
-    for i = 2, #digits do
-        reconstruct = reconstruct .. digits[i]
-    end
-
-    reconstruct = tonumber(reconstruct)
-
-    if neg then
-        reconstruct = -reconstruct
-    end
-
-    return math.max(-32768, math.min(32767, reconstruct))
+    return n
 end
+
 
 local function lookupSymbol(name, grace)
     local offset_ = 0
@@ -332,10 +307,17 @@ local function syscallHandler()
     local func = getValueFromRegister(0x01)
     if func == 0x1 then
         -- Printing to stdout
-        local msgSymbol = getValueFromRegister(0x02) 
-        local msg = lookupSymbol(msgSymbol)
-        if #tostring(msg) == 1 and getValueFromRegister(string.byte(msg)) ~= "REGISTER_NOT_EXISTENT" then
-            msg = getValueFromRegister(string.byte(msg))
+        local msg = ""
+        if not _tonumber(getValueFromRegister(0x02), true) or not _tonumber(getValueFromRegister(0x03), true) then
+            local msgSymbol = getValueFromRegister(0x02) 
+            msg = lookupSymbol(msgSymbol)
+            if #tostring(msg) == 1 and getValueFromRegister(string.byte(msg)) ~= "REGISTER_NOT_EXISTENT" then
+                msg = getValueFromRegister(string.byte(msg))
+            end
+        elseif _tonumber(getValueFromRegister(0x02), true) and _tonumber(getValueFromRegister(0x03), true) then
+            for i = _tonumber(getValueFromRegister(0x02)), _tonumber(getValueFromRegister(0x03)) do
+                msg = msg .. (memory[i] or "\0")
+            end
         end
         io.write(msg)
     elseif func == 0x2 then
@@ -358,7 +340,7 @@ local function syscallHandler()
         start = _tonumber(start)
         _end = _tonumber(_end)
         for i = start, _end do
-            memory[i] = string.char(0x0)
+            memory[i] = string.char(0x25)
         end
     elseif func == 0x3 then
         -- Reading user input
@@ -440,24 +422,43 @@ execute = function(start, finish, startreal)
         local to = tokens[2]
         local from = tokens[3]
         local rval = nil
-
-        if _tonumber(from, true) then
-            -- Immediate
-            rval = _tonumber(from)
-        elseif getValueFromRegister(string.byte(from)) ~= "REGISTER_NOT_EXISTENT" then
+        local ptr = 3
+ 
+        if getValueFromRegister(string.byte(from)) ~= "REGISTER_NOT_EXISTENT" then
             -- Register
             rval = getValueFromRegister(string.byte(from))
         else
-            -- Symbol
+            -- Symbol / number
             local symbol = ""
-            local ptr = 3
-            while tokens[ptr] and not checkValid(string.byte(tokens[ptr]), start + ptr) do
+            while tokens[ptr] and not checkValid(string.byte(tokens[ptr])) do
                 symbol = symbol .. tokens[ptr]
                 ptr = ptr + 1
             end
             rval = symbol
+            if _tonumber(rval, true) then
+                rval = _tonumber(rval)
+            end
         end
         setRegister(string.byte(to), rval)
+        operands = 2
+    elseif string.byte(primary) == instructions.MBYTE then
+        -- syntax: mbyte 0x100
+        local addr = _tonumber(getValueFromRegister(string.byte(tokens[2])))
+        local _end = 0 
+        local ptr = 3
+        local bytes = ""
+        while tokens[ptr] and not checkValid(string.byte(tokens[ptr]), start + ptr) do
+            bytes = bytes .. tokens[ptr]
+            ptr = ptr + 1
+        end
+        
+        for i = 1, #bytes do
+            if memory[addr + (i - 1)] == nil then
+                print(debug.traceback()); print("[FATAL]: Segmentation fault: attempt access unallocated memory.")
+                os.exit(1)
+            end
+            memory[addr + (i - 1)] = string.sub(bytes, i, i)
+        end
         operands = 2
     elseif string.byte(primary) == instructions.JMP then
         local loc
@@ -592,12 +593,10 @@ execute = function(start, finish, startreal)
 
         setRegister(to, _tonumber(first) + _tonumber(second))
         operands = 3
-    elseif string.byte(primary) == instructions.MBYTE then
-        -- syntax: mbyte 0x100
-        local addr = _tonumber(tokens[2])
-        
     elseif string.byte(primary) == instructions.STN then
-        setRegister(string.byte(tokens[2]), _tonumber(lookupSymbol(getValueFromRegister(string.byte(tokens[2])))))
+        if lookupSymbol(getValueFromRegister(string.byte(tokens[2])), true) then
+            setRegister(string.byte(tokens[2]), _tonumber(lookupSymbol(getValueFromRegister(string.byte(tokens[2])))))
+        end
         operands = 1
     end
 

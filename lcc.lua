@@ -24,16 +24,18 @@ local keywords = {
     ["if"] = true,
     ["else"] = true,
     ["void"] = true,
+    ["string_compiler"] = true,
     ["define"] = true,
     ["include"] = true
 }
 
 local vtype = {
     ["void"] = true,
+    ["string_compiler"] = true,
 }
 
 local operator_s = {
-    -- ["="] = true,
+    ["="] = true,
     ["+"] = true,
     ["-"] = true,
     ["*"] = true,
@@ -83,15 +85,18 @@ local errors = {
     [22] = "Unclosed pair",
     [23] = "Functions can only be declared in the global scope",
     [24] = "Action can only be used inside of a function",
-    [25] = "Comparing more than one statement is not supported"
+    [25] = "Comparing more than one statement is not supported",
+    [26] = "Cannot edit readonly variable"
+}
+
+local reserved_varnames = {
+    "__setbytes__",
+    "__setregister__",
+    "__jmploc__",
 }
 
 local function write(text)
     buffer = buffer .. text .. "\n"
-end
-
-local function merge()
-    return "; Definitions ;\n" .. defs .. "\n\n; Functions ;\n\n" .. funcs .. "\n\n; Code ;\n\n" .. code
 end
 
 local function substr(str)
@@ -113,9 +118,12 @@ local function throw(_error, eargs, _type)
     if _type == "error" or _type == nil then
         print("\27[31mError " .. tostring((_error or "(no error number)")) .. ": " .. (errors[_error] or "(no error text)") .. " " .. (eargs or "") .. "\27[0m")
         print("Buffer dump: " .. buffer)
+        print(debug.traceback())
         os.exit(tonumber(_error) or 1)
     end
 end
+
+local cstrings = {}
 
 local function tokenize(text)
     local tokens = {}
@@ -264,6 +272,26 @@ function compile(start, finish, _tokens, where)
                 throw(23)
             end
             local var_name = tokens[i + 1].value
+
+            if table.find(reserved_varnames, var_name) then
+                throw(26, var_name)
+            end
+            if tokens[i + 2].value == "=" then 
+                local _end = 0
+                local vtokens = {}
+                for j = i + 3, finish do
+                    if tokens[j].value == ";" then
+                        _end = j
+                        break
+                    else
+                        table.insert(vtokens, tokens[j])
+                    end
+                end
+                local bytes = parseDef(vtokens)
+                table.insert(cstrings, {var_name, bytes})
+                next = _end + 1
+                goto continue
+            end
             if tokens[i + 2].value ~= "(" then
                 throw(4)
             end
@@ -350,8 +378,7 @@ function compile(start, finish, _tokens, where)
             end
             
             next = __end + 1
-        elseif token.type == "keyword" and not vtype[token.value] then
-            print("Keyword:", token.value)
+        elseif token.type == "keyword" and not vtype[token.value] then 
             if token.value == "include" then
                 local vtokens = {}
 
@@ -368,8 +395,7 @@ function compile(start, finish, _tokens, where)
                     throw(9)
                 end
 
-                local filename = parseDef(vtokens)
-                print("Include filename:", filename)
+                local filename = parseDef(vtokens) 
                 filename = string.gsub(filename, "[\\0%s]", "")
                 if string.find(filename, ".asm$") then
                     write(";- include " .. filename, "funcs")
@@ -536,7 +562,7 @@ function compile(start, finish, _tokens, where)
 
             local last_ = {}
             for j = 1, #args do
-                if args[j].type == "identifier" then
+                if args[j].type == "identifier" or args[j].type == "number" then
                     if last_.type == "identifier" then
                         throw(14)
                     end
@@ -551,19 +577,41 @@ function compile(start, finish, _tokens, where)
                 end
             end
             for j = 1, #args do
+                if args[j] == nil then goto continue end
                 if args[j].value == "," then
                     table.remove(args, j)
                 end
+
+                ::continue::
             end
 
-            for j = 1, #args do
-                write("mov t" .. j .. ", " .. args[j].value)
+            
+
+            if not table.find(reserved_varnames, tokens[i].value) then
+                for j = 1, #args do
+                    write("mov t" .. j .. ", " .. args[j].value)
+                end
+
+                write("mov r4, " .. tokens[i].value)
+                write("jmp")
+            else
+                if tokens[i].value == "__setbytes__" then
+                    local bytes = ""
+                    local found = false
+                    for i = 1, #cstrings do
+                        if cstrings[i][1] == args[2].value then
+                            bytes = cstrings[i][2]
+                            break
+                        end
+                    end
+                    bytes = string.gsub(bytes, "\\0", "")
+                    write("mov t1, " .. args[1].value)
+                    write("stn t1")
+                    write("mbyte t1, [ " .. bytes .. " ]")
+                elseif tokens[i].value == "__setregister__" then
+                    write("mov " .. args[1].value .. ", " .. args[2].value)
+                end
             end
-
-            write("mov r4, " .. tokens[i].value)
-            write("jmp")
-
-            print("Success!")
 
             next = aend + 2
         else
