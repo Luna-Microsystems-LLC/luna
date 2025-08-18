@@ -482,7 +482,6 @@ if not file then error("File not found") end
 local content = file:read("*a")
 file:close()
 compile(content, { filename = infile })
-print("Program compiled to: " .. outbuffer)
 
 local file = io.open(outfile, "w")
 if not file then error("Could not create file") end
