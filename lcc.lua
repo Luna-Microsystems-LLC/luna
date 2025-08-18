@@ -24,14 +24,12 @@ local keywords = {
     ["if"] = true,
     ["else"] = true,
     ["void"] = true,
-    ["string_compiler"] = true,
     ["define"] = true,
     ["include"] = true
 }
 
 local vtype = {
-    ["void"] = true,
-    ["string_compiler"] = true,
+    ["void"] = true, 
 }
 
 local operator_s = {
@@ -201,6 +199,10 @@ end
 
 local function parseDef(tokens)
     -- assume structure is like ", Hello, world, "
+    --
+    for i = 1, #tokens do
+        print("value:", tokens[i].value)
+    end
     local function rebuild(Table)
         local str = ""
         for i = 1, #Table do
@@ -384,11 +386,11 @@ function compile(start, finish, _tokens, where)
 
                 local _end = 0
                 for j = i + 1, finish do
-                    if tokens[j].value == ";" then
+                    print("x", tokens[j].value)
+                    table.insert(vtokens, tokens[j])
+                    if tokens[j].value == "\"" and j ~= i + 1 then
                         _end = j
-                        break
-                    else
-                        table.insert(vtokens, tokens[j])
+                        break 
                     end
                 end
                 if _end == 0 then
@@ -415,26 +417,39 @@ function compile(start, finish, _tokens, where)
             elseif token.value == "define" then
                 local vtokens = {}
                 local var_name = tokens[i + 1].value
-
                 local _end = 0
-                for j = i + 2, finish do
-                    if tokens[j].value == ";" then
-                        _end = j
-                        break
-                    else
+                if var_name ~= "__CSTRING__" then
+                    for j = i + 2, finish do
                         table.insert(vtokens, tokens[j])
+                        if tokens[j].value == "\"" and j ~= i + 2 then
+                            _end = j
+                            break 
+                        end
                     end
-                end
-                if _end == 0 then
-                    throw(9)
-                end
+                    if _end == 0 then
+                        throw(9)
+                    end
 
-                local value = parseDef(vtokens)
+                    local value = parseDef(vtokens)
 
-                if tonumber(value) then
-                    write(var_name .. ": dw " .. tostring(value) .. " :" .. var_name)
+                    if tonumber(value) then
+                        write(var_name .. ": dw " .. tostring(value) .. " :" .. var_name)
+                    else
+                        write(var_name .. ": db \"" .. value .. "\" :" .. var_name)
+                    end
                 else
-                    write(var_name .. ": db \"" .. value .. "\" :" .. var_name)
+                    
+                    var_name = tokens[i + 2]
+                    local vtokens = {}
+                    for j = i + 3, finish do
+                        table.insert(vtokens, tokens[j])
+                        if tokens[j].value == "\"" then
+                            _end = j
+                            break
+                        end
+                    end
+                    local bytes = string.gsub(parseDef(vtokens), "\\0", "")
+                    table.insert(cstrings, {var_name, bytes})
                 end
 
                 next = _end + 1
