@@ -126,10 +126,9 @@ local instructions = {
     FEND = 0x18;
     JZ = 0x19;
     DW = 0x1a;
-    MBYTE = 0x1b;
-    BSTART = 0x1c;
-    BEND = 0x1d;
-    STN = 0x1e;
+    MBYTE = 0x1b; 
+    STN = 0x1c;
+    STACK = 0x1d;
 }
 
 local function getInstructionFromName(ins)
@@ -230,6 +229,10 @@ compile = function(text, args)
         writeToBuf(getRegisterFromName(to))
         writeToBuf(from)
         after = 4
+    elseif string.upper(tokens[1]) == "STACK" then
+        writeToBuf(getInstructionFromName(tokens[1]))
+        writeToBufRaw(tokens[2])
+        after = 3
     elseif string.upper(tokens[1]) == ";" then
         local _end = 0
         for i = 2, #tokens do

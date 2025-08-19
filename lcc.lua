@@ -24,14 +24,18 @@ local keywords = {
     ["if"] = true,
     ["else"] = true,
     ["void"] = true,
-    ["string_compiler"] = true,
+    ["int"] = true,
+    ["char*"] = true,
     ["define"] = true,
-    ["include"] = true
+    ["include"] = true,
+    ["pragma"] = true,
+    ["return"] = true,
 }
 
 local vtype = {
     ["void"] = true,
-    ["string_compiler"] = true,
+    ["int"] = true,
+    ["char*"] = true,
 }
 
 local operator_s = {
@@ -71,7 +75,7 @@ local errors = {
     [8] = "Variable or function declaration expected",
     [9] = "';' expected",
     [10] = "Closing '\" expected",
-    [11] = "Main function return type required to be 'void'",
+    [11] = "'main' function required to return to integer",
     [12] = "Unnecessary arguments to main fucntion",
     [13] = "Identifier expected",
     [14] = "',' expected",
@@ -86,40 +90,58 @@ local errors = {
     [23] = "Functions can only be declared in the global scope",
     [24] = "Action can only be used inside of a function",
     [25] = "Comparing more than one statement is not supported",
-    [26] = "Cannot edit readonly variable"
+    [26] = "Cannot edit readonly variable",
+    [27] = "Number expected",
+    [28] = "Unknown pragma directive",
+    [29] = "No stack memory allocated to program",
+    [30] = "Stack exceeds stack size",
+    [31] = "Undefined variable",
+    [32] = "Consider adding an explicit return value to 'main' function"
 }
 
 local reserved_varnames = {
     "__setbytes__",
     "__setregister__",
-    "__jmploc__",
+    "__jmploc__", 
+    "__stack_size__",
+    "__write__"
 }
 
-local function write(text)
-    buffer = buffer .. text .. "\n"
-end
+local STACK_SIZE = 0
+local STACK_OFFSET = 0
 
-local function substr(str)
-    local i = 1
-    local depth = 0
-    local function peek()
-        return string.sub(str, i, i) or nil
-    end
-    local function advance()
-        i = i + 1
-    end
-
-    while peek() ~= nil do
-        
+local function write(text, prepend)
+    if prepend ~= true then
+        buffer = buffer .. text .. "\n"
+    else
+        buffer = text .. "\n" .. buffer
     end
 end
 
-local function throw(_error, eargs, _type)
+local variables = {
+    -- we will store it like <identifier><value>
+    -- in the table it will be stored like
+    -- {
+    --    identifier = 1
+    --    value 
+    -- }
+    -- ids: int (1)
+}
+
+local function tohex16(n)
+    return string.format("%04X", n & 0xFFFF)
+end
+
+local function throw(_error, eargs, _type) 
     if _type == "error" or _type == nil then
         print("\27[31mError " .. tostring((_error or "(no error number)")) .. ": " .. (errors[_error] or "(no error text)") .. " " .. (eargs or "") .. "\27[0m")
         print("Buffer dump: " .. buffer)
         print(debug.traceback())
         os.exit(tonumber(_error) or 1)
+    elseif _type == "warning" then
+        print("\27[33mWarning " .. tostring((_error or "(no warning number)")) .. ": " .. (errors[_error] or "(no error text)") .. " " .. (eargs or "") .. "\27[0m")
+    elseif _type == "info" then
+        print("\27[34mInfo " .. tostring((_error or "(no info number)")) .. ": " .. (errors[_error] or "(no info text)") .. " " .. (eargs or "") .. "\27[0m") 
     end
 end
 
@@ -145,10 +167,10 @@ local function tokenize(text)
 
         if string.match(c, "%s") then
             advance()
-        elseif string.match(c, "[%a_#]") then
+        elseif string.match(c, "[%a_@*#]") then
             local start = i
             local matched = false
-            while string.match(peek(), "[%w_]") do
+            while string.match(peek(), "[%w_*@]") do
                 advance()
                 matched = true
             end
@@ -243,8 +265,29 @@ local function parseDef(tokens)
     end
 end
 
+local function findVariable(name)
+    for _, variable in pairs(variables) do
+        if variable.name == name then
+            return variable
+        end
+    end
+    return nil
+end
+
+local function findVariableAddress(variable)
+    variable = findVariable(variable)
+    local offset = variable.address
+    if variable.type == "int" then
+        return offset, offset + 4
+    elseif variable.type == "char*" then
+        return offset, (offset + variable.length) - 1
+    end
+    return nil
+end
+
 local tokens_ = {}
 local level = 0
+local TORETURN = nil
 function compile(start, finish, _tokens, where)
     local tokens = {}
     where = where or "code"
@@ -276,7 +319,9 @@ function compile(start, finish, _tokens, where)
             if table.find(reserved_varnames, var_name) then
                 throw(26, var_name)
             end
+
             if tokens[i + 2].value == "=" then 
+                -- Variable
                 local _end = 0
                 local vtokens = {}
                 for j = i + 3, finish do
@@ -287,11 +332,52 @@ function compile(start, finish, _tokens, where)
                         table.insert(vtokens, tokens[j])
                     end
                 end
-                local bytes = parseDef(vtokens)
-                table.insert(cstrings, {var_name, bytes})
+                if _end == 0 then
+                    throw(9)
+                end
+
+                local offset = nil
+                local variable = findVariable(var_name)
+                local content = ""
+                local _type = token.value
+                local sizeof = 0
+                local added = false
+                if variable then
+                    offset = variable.address
+                else
+                    offset = STACK_OFFSET
+                    table.insert(variables, { name = var_name, address = STACK_OFFSET, type = _type })
+                    variable = findVariable(var_name)
+                    added = true
+                end
+                write("mov t11, " .. offset)
+                write("add r0, sp, t11")
+
+                if token.value == "int" then
+                    local number = tonumber(tokens[i + 3].value)
+                    if not number then
+                        throw(27)
+                    end
+                    content = tohex16(number)
+                    sizeof = 4
+                elseif token.value == "char*" then
+                    content = string.gsub(parseDef(vtokens), "\\0", "")
+                    sizeof = string.len(content)
+                    variable.length = sizeof
+                    sizeof = sizeof - 1
+                end
+
+                write("mbyte r0, [ " .. content .. " ]")
+
+                if added then
+                    STACK_OFFSET = STACK_OFFSET + sizeof + 1
+                end
+ 
                 next = _end + 1
                 goto continue
             end
+
+            -- Function
             if tokens[i + 2].value ~= "(" then
                 throw(4)
             end
@@ -369,14 +455,29 @@ function compile(start, finish, _tokens, where)
                 write(":" .. var_name .. ":")
             end
 
+            if var_name == "main" and token.value ~= "int" then
+                throw(11)
+            end
+
             level = 1
             compile(1, #ftokens, ftokens)
             level = 0
 
             if var_name ~= "main" then
+                if TORETURN ~= nil then
+                    write("mov t9, " .. TORETURN)
+                end
                 write(":" .. var_name .. ":")
+            else 
+                write("mov r1, 4")
+                write("mov r2, " .. (TORETURN or "0"))
+                write("syscall")
+                if TORETURN == nil then
+                    throw(32, "", "info")
+                end
             end
-            
+           
+            TORETURN = nil
             next = __end + 1
         elseif token.type == "keyword" and not vtype[token.value] then 
             if token.value == "include" then
@@ -384,11 +485,10 @@ function compile(start, finish, _tokens, where)
 
                 local _end = 0
                 for j = i + 1, finish do
-                    if tokens[j].value == ";" then
+                    table.insert(vtokens, tokens[j])
+                    if tokens[j].value == "\"" and j > i + 1 then
                         _end = j
-                        break
-                    else
-                        table.insert(vtokens, tokens[j])
+                        break 
                     end
                 end
                 if _end == 0 then
@@ -418,11 +518,10 @@ function compile(start, finish, _tokens, where)
 
                 local _end = 0
                 for j = i + 2, finish do
-                    if tokens[j].value == ";" then
-                        _end = j
+                    table.insert(vtokens, tokens[j])
+                    if tokens[j].value == "\"" and j > i + 2 then
+                        _end = j 
                         break
-                    else
-                        table.insert(vtokens, tokens[j])
                     end
                 end
                 if _end == 0 then
@@ -438,6 +537,29 @@ function compile(start, finish, _tokens, where)
                 end
 
                 next = _end + 1
+            elseif token.value == "pragma" then
+                local _end = 0
+                -- This one is a fun one since pragma can recognize ANY sequence of tokens
+                for j = i + 1, finish do 
+                    if tokens[j].type == "keyword" then
+                        _end = j
+                        break
+                    end
+                end
+               if tokens[i + 1].value == "__stack_size__" then
+                    if not tonumber(tokens[i + 2].value) then throw(27) end
+                    STACK_SIZE = tonumber(tokens[i + 2].value) 
+                    _end = i + 3
+                else
+                    throw(28, "'" .. tokens[i + 1].value .. "'", "info") 
+                end
+                next = _end
+            elseif token.value == "return" then
+                TORETURN = tokens[i + 1].value
+                if tokens[i + 2].value ~= ";" then
+                    throw(9)
+                end
+                next = i + 3
             elseif token.value == "if" then
                 if level == 0 then
                     throw(24)
@@ -610,6 +732,17 @@ function compile(start, finish, _tokens, where)
                     write("mbyte t1, [ " .. bytes .. " ]")
                 elseif tokens[i].value == "__setregister__" then
                     write("mov " .. args[1].value .. ", " .. args[2].value)
+                elseif tokens[i].value == "__write__" then
+                    write("mov r1, 1")
+                    local start, _end = findVariableAddress(args[1].value)
+                    if not start then
+                        throw(31, "'" .. args[1].value .. "'")
+                    end
+                    write("mov r2, " .. start)
+                    write("mov r3, " .. _end)
+                    write("add r2, r2, sp")
+                    write("add r3, r3, sp")
+                    write("syscall")
                 end
             end
 
@@ -639,7 +772,18 @@ end
 local contents = _infile:read("a")
 _infile:close()
 tokens_ = tokenize(contents)
+
 compile(1, #tokens_, tokens_)
+
+if STACK_SIZE > 0 then
+    write("stack " .. STACK_SIZE, true)
+else 
+    throw(29, "", "warning")
+end
+
+if STACK_OFFSET > STACK_SIZE then
+    throw(30, "(allocated: " .. STACK_SIZE .. ", actual: " .. STACK_OFFSET .. ")", "warning")
+end
 
 local _outfile = io.open(outfile, "w")
 if not _outfile then

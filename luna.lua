@@ -29,7 +29,7 @@ local registers = {
     {0xa, "R10", nil},
     {0xb, "R11", nil},
     {0xc, "R12", nil},
-    {0xd, "SP", nil},
+    {0xd, "SP", 0},
     {0xe, "PC", 0},
     {0xf, "T1", nil},
     {0x10, "T2", nil},
@@ -72,10 +72,9 @@ local instructions = {
     FEND = 0x18;
     JZ = 0x19;
     DW = 0x1a;
-    MBYTE = 0x1b;
-    BSTART = 0x1c;
-    BEND = 0x1d;
-    STN = 0x1e;
+    MBYTE = 0x1b; 
+    STN = 0x1c;
+    STACK = 0x1d;
 }
 
 local ignorelist = {
@@ -315,7 +314,7 @@ local function syscallHandler()
                 msg = getValueFromRegister(string.byte(msg))
             end
         elseif _tonumber(getValueFromRegister(0x02), true) and _tonumber(getValueFromRegister(0x03), true) then
-            for i = _tonumber(getValueFromRegister(0x02)), _tonumber(getValueFromRegister(0x03)) do
+            for i = _tonumber(getValueFromRegister(0x02)), _tonumber(getValueFromRegister(0x03)) do 
                 msg = msg .. (memory[i] or "\0")
             end
         end
@@ -360,7 +359,8 @@ local function syscallHandler()
         end
         execute(start, #memory, start)
     elseif func == 0x4 then
-        local code = _tonumber(lookupSymbol(getValueFromRegister(0x2)), true)
+        local code = _tonumber(lookupSymbol(getValueFromRegister(0x2), true), true)
+        if not code then code = _tonumber(getValueFromRegister(0x2), true) end
         if not code then
             code = 0
         end
@@ -452,7 +452,7 @@ execute = function(start, finish, startreal)
             ptr = ptr + 1
         end
         
-        for i = 1, #bytes do
+        for i = 1, #bytes do 
             if memory[addr + (i - 1)] == nil then
                 print(debug.traceback()); print("[FATAL]: Segmentation fault: attempt access unallocated memory.")
                 os.exit(1)
@@ -598,6 +598,20 @@ execute = function(start, finish, startreal)
             setRegister(string.byte(tokens[2]), _tonumber(lookupSymbol(getValueFromRegister(string.byte(tokens[2])))))
         end
         operands = 1
+    elseif string.byte(primary) == instructions.STACK then
+        local ptr = 2
+        local bytes = ""
+        while tokens[ptr] and not checkValid(string.byte(tokens[ptr]), start + ptr) do
+            bytes = bytes .. tokens[ptr]
+            ptr = ptr + 1
+        end
+        size = _tonumber(bytes)
+        local start = getValueFromRegister(0x1b) + 1
+        for i = start, start + bytes do
+            memory[i] = "\0"
+        end
+        setRegister(0xd, start)
+        operands = 2
     end
 
     local newoffset = start + operands + 1
