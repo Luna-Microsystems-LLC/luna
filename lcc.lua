@@ -18,7 +18,7 @@ local tempcounter = 1
 
 local defs = ""
 local funcs = ""
-local code = "" -- To keep things organized
+local code = ""
 
 local keywords = {
     ["if"] = true,
@@ -29,7 +29,7 @@ local keywords = {
     ["define"] = true,
     ["include"] = true,
     ["pragma"] = true,
-    ["return"] = true,
+    ["return"] = true, 
 }
 
 local vtype = {
@@ -96,37 +96,57 @@ local errors = {
     [29] = "No stack memory allocated to program",
     [30] = "Stack exceeds stack size",
     [31] = "Undefined variable",
-    [32] = "Consider adding an explicit return value to 'main' function"
+    [32] = "Consider adding an explicit return value to 'main' function",
+    [33] = "Reference to undefined/implicit variable/function",
+    [34] = "Unused variable/function",
+    [35] = "LASM not found",
+    [36] = "Assembling program failed"
 }
 
 local reserved_varnames = {
-    "__setbytes__",
     "__setregister__",
-    "__jmploc__", 
+    "__jmp__",
     "__stack_size__",
-    "__write__"
+    "__extern__",
+    "__nop__",
+    "goto"
 }
 
 local STACK_SIZE = 0
 local STACK_OFFSET = 0
 
-local function write(text, prepend)
-    if prepend ~= true then
-        buffer = buffer .. text .. "\n"
+local function write(where, text, prepend)
+    if where == "defs" then
+        if not prepend then
+            defs = defs .. text .. "\n"
+        else
+            defs = text .. "\n" .. defs
+        end
+    elseif where == "funcs" then
+        funcs = funcs .. text .. "\n"
     else
-        buffer = text .. "\n" .. buffer
+        code = code .. text .. "\n"
     end
 end
 
-local variables = {
-    -- we will store it like <identifier><value>
-    -- in the table it will be stored like
-    -- {
-    --    identifier = 1
-    --    value 
-    -- }
-    -- ids: int (1)
-}
+local variables = {}
+
+-- insert registers
+for i = 0, 12 do
+    table.insert(variables, {
+        name = "r" .. i,
+        type = "any",
+        ignoreunused = true,
+    })
+    table.insert(variables, {
+        name = "t" .. i,
+        type = "any",
+        ignoreunused = true,
+    })
+end
+table.insert(variables, { name = "pc", type = "any", ignoreunused = true, })
+table.insert(variables, { name = "ptr", type = "any", ignoreunused = true, })
+table.insert(variables, { name = "sp", type = "any", ignoreunused = true, })
 
 local function tohex16(n)
     return string.format("%04X", n & 0xFFFF)
@@ -134,9 +154,11 @@ end
 
 local function throw(_error, eargs, _type) 
     if _type == "error" or _type == nil then
-        print("\27[31mError " .. tostring((_error or "(no error number)")) .. ": " .. (errors[_error] or "(no error text)") .. " " .. (eargs or "") .. "\27[0m")
-        print("Buffer dump: " .. buffer)
-        print(debug.traceback())
+        print("\27[31mError " .. tostring((_error or "(no error number)")) .. ": " .. (errors[_error] or "(no error text)") .. " " .. (eargs or "") .. "\27[0m") 
+        if table.find(arg, "--error-extra-info") then
+            print("Buffer dump: " .. buffer)
+            print(debug.traceback())
+        end
         os.exit(tonumber(_error) or 1)
     elseif _type == "warning" then
         print("\27[33mWarning " .. tostring((_error or "(no warning number)")) .. ": " .. (errors[_error] or "(no error text)") .. " " .. (eargs or "") .. "\27[0m")
@@ -145,14 +167,13 @@ local function throw(_error, eargs, _type)
     end
 end
 
-local cstrings = {}
-
 local function tokenize(text)
     local tokens = {}
     local i = 1
     local quotes = false
     local comment = false
     local current_str = ""
+    local lastslash = true
 
     local function peek(n)
         return string.sub(text, i, i + (n or 0))
@@ -164,13 +185,13 @@ local function tokenize(text)
 
     while i <= #text do
         local c = peek()
-
+ 
         if string.match(c, "%s") then
             advance()
-        elseif string.match(c, "[%a_@*#]") then
+        elseif string.match(c, "[%a_@*#\\]") then
             local start = i
             local matched = false
-            while string.match(peek(), "[%w_*@]") do
+            while string.match(peek(), "[%w_*@\\]") do
                 advance()
                 matched = true
             end
@@ -186,12 +207,22 @@ local function tokenize(text)
                 advance()
             end
             table.insert(tokens, { type = "number", value = string.sub(text, start, i - 1) })
+        elseif c == "/" then
+            if string.sub(text, i + 1, i + 1) == "/" then
+                while peek() ~= "\n" do advance() end
+                advance()
+            else
+                advance()
+            end
         elseif operator_d[peek(1)] then
             table.insert(tokens, { type = "operator", value = peek(1) })
             advance(2)
         elseif operator_s[c] then
-            table.insert(tokens, { type = "operator", value = c })
-            advance()
+            local function insert()
+                table.insert(tokens, { type = "operator", value = c })
+                advance()
+            end
+            insert() 
         elseif symbols[c] then
             if c == "\"" then
                 if quotes == false then
@@ -202,10 +233,7 @@ local function tokenize(text)
             end
 
             table.insert(tokens, { type = "symbol", value = c })
-            advance()
-        elseif string.match(c, "//") then
-            while peek() ~= "\n" do advance() end
-            advance()
+            advance() 
         else
             if quotes == false then
                 throw(1, "'" .. c .. "'")
@@ -214,11 +242,70 @@ local function tokenize(text)
                 advance()
             end
         end
-
+ 
         ::continue::
     end
 
     return tokens
+end
+
+local function hoist(buffer)
+    local tokens = {}
+    local rc = 1
+    local funcs = {}
+    local ordered = {}
+
+    for token in string.gmatch(buffer, "[^\n]+") do
+        table.insert(tokens, token)
+    end
+
+    local depth = 0
+    local depths = {}
+    local current = nil
+
+    for i, token in ipairs(tokens) do
+        if string.sub(token, 1, 1) == ":" and string.sub(token, #token, #token) == ":" then
+            if not funcs[token] then
+                funcs[token] = {}
+                table.insert(funcs[token], token)
+                table.insert(ordered, funcs[token])
+                current = funcs[token]
+                depth = depth + 1
+                depths[depth] = funcs[token]
+            else
+                table.insert(funcs[token], token)
+                depth = depth - 1
+                if depth > 0 then
+                    current = depths[depth]
+                else
+                    current = nil
+                end
+            end
+        else
+            if current ~= nil then
+                table.insert(current, token)
+            else
+                funcs[rc] = {}
+                table.insert(funcs[rc], token)
+                table.insert(ordered, funcs[rc])
+                rc = rc + 1
+            end
+        end
+    end
+
+    local reconstruct = ""
+    for _, array in ipairs(ordered) do
+        for i = 1, #array do
+            reconstruct = reconstruct .. array[i] .. "\n"
+        end
+    end
+
+    return reconstruct
+end
+
+local function rebuildBuffer()
+    local funcs_ = hoist(funcs)
+    buffer = buffer .. "; Definitions ;\n\n" .. defs .. "\n\n; Functions ;\n\n" .. funcs_ .. "\n\n; Code ;\n\n" .. code 
 end
 
 local function parseDef(tokens)
@@ -251,7 +338,7 @@ local function parseDef(tokens)
             throw(10)
         end
         local words = {}
-        for i = 2, _end - 1 do
+        for i = 2, _end - 1 do 
             table.insert(words, tokens[i].value)
         end
 
@@ -268,21 +355,29 @@ end
 local function findVariable(name)
     for _, variable in pairs(variables) do
         if variable.name == name then
+            variable.used = true
             return variable
         end
     end
     return nil
 end
 
-local function findVariableAddress(variable)
-    variable = findVariable(variable)
-    local offset = variable.address
-    if variable.type == "int" then
-        return offset, offset + 4
-    elseif variable.type == "char*" then
-        return offset, (offset + variable.length) - 1
+local function resolveVariables(args)
+    for i, argument in pairs(args) do
+        local variable = findVariable(argument.value)
+        if variable then
+            if variable.type == "char_ptr" then
+                args[i].value = variable.address 
+            end
+        elseif not variable and argument.type == "identifier" then
+            if not table.find(arg, "--allow-implicit") then
+                throw(33, "'" .. argument.value .. "'")
+            else
+                throw(33, "'" .. argument.value .. "'", "warning")
+            end
+        end
     end
-    return nil
+    return args
 end
 
 local tokens_ = {}
@@ -334,44 +429,28 @@ function compile(start, finish, _tokens, where)
                 end
                 if _end == 0 then
                     throw(9)
-                end
-
-                local offset = nil
-                local variable = findVariable(var_name)
-                local content = ""
-                local _type = token.value
-                local sizeof = 0
-                local added = false
-                if variable then
-                    offset = variable.address
-                else
-                    offset = STACK_OFFSET
-                    table.insert(variables, { name = var_name, address = STACK_OFFSET, type = _type })
-                    variable = findVariable(var_name)
-                    added = true
-                end
-                write("mov t11, " .. offset)
-                write("add r0, sp, t11")
+                end 
 
                 if token.value == "int" then
-                    local number = tonumber(tokens[i + 3].value)
-                    if not number then
-                        throw(27)
-                    end
-                    content = tohex16(number)
-                    sizeof = 4
+                    table.insert(variables, {
+                        name = var_name,
+                        type = "int",
+                    })
+                    write("defs", var_name .. ": dw" .. tohex16(tokens[i + 3].value) .. " :" .. var_name)
                 elseif token.value == "char*" then
-                    content = string.gsub(parseDef(vtokens), "\\0", "")
-                    sizeof = string.len(content)
-                    variable.length = sizeof
-                    sizeof = sizeof - 1
-                end
-
-                write("mbyte r0, [ " .. content .. " ]")
-
-                if added then
-                    STACK_OFFSET = STACK_OFFSET + sizeof + 1
-                end
+                    table.insert(variables, {
+                        name = var_name,
+                        type = "char_ptr",
+                        address = STACK_OFFSET
+                    })
+                    local content = string.gsub(parseDef(vtokens), "\\0", "")
+                    content = string.gsub(content, "\0", "")
+                    content = content .. "\0"
+                    write(where, "mov r0, " .. STACK_OFFSET)
+                    write(where, "add r0, r0, sp")
+                    write(where, "mbyte r0, [ " .. content .. " ]")
+                    STACK_OFFSET = STACK_OFFSET + string.len(content)
+                end 
  
                 next = _end + 1
                 goto continue
@@ -381,45 +460,17 @@ function compile(start, finish, _tokens, where)
             if tokens[i + 2].value ~= "(" then
                 throw(4)
             end
-            --[[
-            local args = {}
-            ]]--
+
             local _end = 0
             for j = i + 3, finish do
                 if tokens[j].value == ")" then
                     _end = j
-                    break
-                else
-                    --table.insert(args, tokens[j].value)
+                    break 
                 end
             end
             if _end == 0 then
                 throw(5)
-            end
-
-            --[[
-            local last_ = {}
-            for j = 1, #args do
-                if args[j].type == "identifier" then
-                    if last_.type == "identifier" then
-                        throw(14)
-                    end
-                    last_ = args[j]
-                elseif args[j].type == "symbol" and args[j].value == "," then
-                    if last_.type == "symbol" then
-                        throw(1, ",")
-                    end
-                    last_ = args[j]
-                else
-                    throw(1, "'" .. args[j].value .. "'")
-                end
-            end
-            for j = 1, #args do
-                if args[j].value == "," then
-                    table.remove(args, j)
-                end
-            end
-            ]]--
+            end 
 
             local cdepth = 0
             local __end = 0
@@ -451,33 +502,42 @@ function compile(start, finish, _tokens, where)
                 throw(7)
             end
 
+            table.insert(variables, {
+                name = var_name,
+                type = "function",
+                used = (var_name == "main" and true or false)
+            })
+
             if var_name ~= "main" then
-                write(":" .. var_name .. ":")
+                write("funcs", ":" .. var_name .. ":")
             end
 
             if var_name == "main" and token.value ~= "int" then
                 throw(11)
             end
 
+            local cwhere = "funcs"
+
+            if var_name == "main" then
+                cwhere = "code"
+            end
+ 
             level = 1
-            compile(1, #ftokens, ftokens)
+            compile(1, #ftokens, ftokens, cwhere)
             level = 0
 
             if var_name ~= "main" then
-                if TORETURN ~= nil then
-                    write("mov t9, " .. TORETURN)
-                end
-                write(":" .. var_name .. ":")
+                write("funcs" ,":" .. var_name .. ":")
             else 
-                write("mov r1, 4")
-                write("mov r2, " .. (TORETURN or "0"))
-                write("syscall")
+                write("code", "mov r1, 4")
+                write("code", "mov r2, " .. (TORETURN or "0"))
+                write("code", "syscall")
                 if TORETURN == nil then
                     throw(32, "", "info")
                 end
             end
            
-            TORETURN = nil
+            TORETURN = nil 
             next = __end + 1
         elseif token.type == "keyword" and not vtype[token.value] then 
             if token.value == "include" then
@@ -498,7 +558,7 @@ function compile(start, finish, _tokens, where)
                 local filename = parseDef(vtokens) 
                 filename = string.gsub(filename, "[\\0%s]", "")
                 if string.find(filename, ".asm$") then
-                    write(";- include " .. filename, "funcs")
+                    write("defs", ";- include " .. filename)
                 elseif string.find(filename, ".c$") then
                     local file = io.open(filename, 'r')
                     if not file then
@@ -531,10 +591,15 @@ function compile(start, finish, _tokens, where)
                 local value = parseDef(vtokens)
 
                 if tonumber(value) then
-                    write(var_name .. ": dw " .. tostring(value) .. " :" .. var_name)
+                    write("defs", var_name .. ": dw " .. tostring(value) .. " :" .. var_name)
                 else
-                    write(var_name .. ": db \"" .. value .. "\" :" .. var_name)
+                    write("defs", var_name .. ": db \"" .. value .. "\" :" .. var_name)
                 end
+
+                table.insert(variables, {
+                    name = var_name,
+                    type = "label"
+                })
 
                 next = _end + 1
             elseif token.value == "pragma" then
@@ -546,10 +611,20 @@ function compile(start, finish, _tokens, where)
                         break
                     end
                 end
-               if tokens[i + 1].value == "__stack_size__" then
+                if tokens[i + 1].value == "__stack_size__" then
                     if not tonumber(tokens[i + 2].value) then throw(27) end
                     STACK_SIZE = tonumber(tokens[i + 2].value) 
                     _end = i + 3
+                elseif tokens[i + 1].value == "__extern__" then
+                    table.insert(variables, {
+                        name = tokens[i + 2].value,
+                        type = "any"
+                    })
+                    _end = i + 3
+                elseif tokens[i + 1].value == "point" then
+                    write(where, "mov t12, pc")
+                    write(where, "nop")
+                    _end = i + 2
                 else
                     throw(28, "'" .. tokens[i + 1].value .. "'", "info") 
                 end
@@ -591,9 +666,11 @@ function compile(start, finish, _tokens, where)
                 local exptokens = {}
                 local restokens = {}
                 local split = 0
+                local exp = ""
                 for j = 1, #condtokens do
                     if condtokens[j].value == "==" or condtokens[j].value == "!=" then
                         split = j
+                        exp = condtokens[j].value
                         break
                     else
                         table.insert(exptokens, condtokens[j])
@@ -610,6 +687,9 @@ function compile(start, finish, _tokens, where)
                 if #exptokens > 1 or #restokens > 1 then
                     throw(25)
                 end
+
+                exptokens = resolveVariables(exptokens)
+                restokens = resolveVariables(restokens)
 
                 -- Handle code part
                 local cdepth = 0
@@ -642,18 +722,23 @@ function compile(start, finish, _tokens, where)
                     throw(7)
                 end
 
-                write(":lcc_" .. tostring(tempcounter) .. ":")
-                for j = 1, #ftokens do
-                    print("FTOKEN:", ftokens[j].value)
-                end
-                compile(1, #ftokens, ftokens)
-                write(":lcc_" .. tostring(tempcounter) .. ":")
+                local op = ""
 
-                write("mov t7, " .. exptokens[1].value)
-                write("mov t8, " .. restokens[1].value)
-                write("mov r4, lcc_" .. tostring(tempcounter))
-                write("cmp t7, t8")
-                write("jnz r5")
+                if exp == "==" then
+                    op = "jnz"
+                elseif exp == "!=" then
+                    op = "jz"
+                end
+
+                write("funcs", ":lcc_" .. tostring(tempcounter) .. ":")
+                compile(1, #ftokens, ftokens, "funcs")
+                write("funcs", ":lcc_" .. tostring(tempcounter) .. ":")
+
+                write(where, "mov t7, " .. exptokens[1].value)
+                write(where, "mov t8, " .. restokens[1].value)
+                write(where, "mov r4, lcc_" .. tostring(tempcounter))
+                write(where, "cmp t7, t8")
+                write(where, op .. " r5")
 
                 tempcounter = tempcounter + 1
                 next = fend + 1
@@ -661,6 +746,15 @@ function compile(start, finish, _tokens, where)
         elseif tokens[i].type == "identifier" and tokens[i + 1].value == "(" then
             -- Function call
             -- ( is prechecked
+            
+            if not findVariable(tokens[i].value) and not table.find(reserved_varnames, tokens[i].value) then
+                if not table.find(arg, "--allow-implicit") then
+                    throw(33, "'" .. tokens[i].value .. "'")
+                else
+                    throw(33, "'" .. tokens[i].value .. "'", "warning")
+                end
+            end
+
             if level < 1 then
                 throw(24)
             end
@@ -707,42 +801,29 @@ function compile(start, finish, _tokens, where)
                 ::continue::
             end
 
-            
+            args = resolveVariables(args)
+
+            if #args > 6 then
+                throw(20)   
+            end
 
             if not table.find(reserved_varnames, tokens[i].value) then
                 for j = 1, #args do
-                    write("mov t" .. j .. ", " .. args[j].value)
+                    write(where, "mov t" .. j .. ", " .. args[j].value)
                 end
 
-                write("mov r4, " .. tokens[i].value)
-                write("jmp")
-            else
-                if tokens[i].value == "__setbytes__" then
-                    local bytes = ""
-                    local found = false
-                    for i = 1, #cstrings do
-                        if cstrings[i][1] == args[2].value then
-                            bytes = cstrings[i][2]
-                            break
-                        end
-                    end
-                    bytes = string.gsub(bytes, "\\0", "")
-                    write("mov t1, " .. args[1].value)
-                    write("stn t1")
-                    write("mbyte t1, [ " .. bytes .. " ]")
-                elseif tokens[i].value == "__setregister__" then
-                    write("mov " .. args[1].value .. ", " .. args[2].value)
-                elseif tokens[i].value == "__write__" then
-                    write("mov r1, 1")
-                    local start, _end = findVariableAddress(args[1].value)
-                    if not start then
-                        throw(31, "'" .. args[1].value .. "'")
-                    end
-                    write("mov r2, " .. start)
-                    write("mov r3, " .. _end)
-                    write("add r2, r2, sp")
-                    write("add r3, r3, sp")
-                    write("syscall")
+                write(where, "mov r4, " .. tokens[i].value)
+                write(where, "jmp")
+            else 
+                if tokens[i].value == "__setregister__" then
+                    write(where, "mov " .. args[1].value .. ", " .. args[2].value)
+                elseif tokens[i].value == "__jmp__" then
+                    write(where, "jmp")
+                elseif tokens[i].value == "__nop__" then
+                    write(where, "nop")
+                elseif tokens[i].value == "goto" then
+                    write(where, "mov r4, t12")
+                    write(where, "jmp")
                 end
             end
 
@@ -776,19 +857,61 @@ tokens_ = tokenize(contents)
 compile(1, #tokens_, tokens_)
 
 if STACK_SIZE > 0 then
-    write("stack " .. STACK_SIZE, true)
+    write("defs", "stack " .. STACK_SIZE, true)
 else 
     throw(29, "", "warning")
 end
 
-if STACK_OFFSET > STACK_SIZE then
-    throw(30, "(allocated: " .. STACK_SIZE .. ", actual: " .. STACK_OFFSET .. ")", "warning")
+if (STACK_OFFSET - 1) > STACK_SIZE then
+    throw(30, "(allocated: " .. STACK_SIZE .. ", actual: " .. STACK_OFFSET - 1 .. ")", "warning")
 end
 
-local _outfile = io.open(outfile, "w")
-if not _outfile then
-    error("Could not create output file")
+for _, variable in pairs(variables) do
+    if variable.used ~= true and variable.ignoreunused ~= true then
+        throw(34, "'" .. variable.name .. "'", "warning")
+    end
 end
 
-_outfile:write(buffer)
-_outfile:close()
+rebuildBuffer()
+
+
+
+if table.find(arg, "-e") then
+    if os.getenv("OS") ~= "Windows_NT" then
+        local _, __, returnvalue = os.execute("which lasm > /dev/null")
+        if tonumber(returnvalue) ~= 0 then
+            throw(35)
+        end
+    else
+        local _, __, returnvalue = os.execute("where lasm > nul")
+        if tonumber(returnvalue) ~= 0 then
+            throw(35)
+        end
+    end
+
+    math.randomseed(os.time())
+    local filename = "lcc_temporary" .. math.random(10000, 99999) .. ".asm"
+    local file = io.open(filename, 'w')
+    if not file then
+        error("Could not create output file")
+    end
+    file:write(buffer)
+    file:close()
+    local _, __, returnvalue = os.execute("lasm " .. filename .. " " .. outfile)
+    if tonumber(returnvalue) ~= 0 then
+        throw(36)
+    end
+    if os.getenv("OS") ~= "Windows_NT" then
+        os.execute("rm " .. filename)
+    else
+        os.execute("del " .. filename)
+    end
+else
+    local _outfile = io.open(outfile, "w")
+    if not _outfile then
+        error("Could not create output file")
+    end
+    _outfile:write(buffer)
+    _outfile:close()
+end
+

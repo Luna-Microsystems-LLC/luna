@@ -46,9 +46,10 @@ local outbuffer = ""
 local function throwNew(typeo, err, args)
 	local etext = errors[err]
 	if typeo == "warning" then
-		print("Warning: " .. etext .. " " .. args .. " (Warning " .. tostring(err) .. ")")
+        print("\27[33mWarning " .. (tostring(err) or "") .. ": " .. (etext or "") .. " " .. (args or "") .. "\27[0m")
 	elseif typeo == "error" then
-		print("Error: " .. etext .. " " .. args .. " (Error " .. tostring(err) .. ")")
+        print("\27[31mError " .. (tostring(err) or "") .. ": " .. (etext or "") .. " " .. (args or "") .. "\27[0m")
+        print(debug.traceback())
 		os.exit(err)
 	end
 end
@@ -129,6 +130,7 @@ local instructions = {
     MBYTE = 0x1b; 
     STN = 0x1c;
     STACK = 0x1d;
+    LDA = 0x1e;
 }
 
 local function getInstructionFromName(ins)
@@ -229,6 +231,15 @@ compile = function(text, args)
         writeToBuf(getRegisterFromName(to))
         writeToBuf(from)
         after = 4
+    elseif string.upper(tokens[1]) == "LDA" then
+        local to = tokens[2]
+        local addr = tokens[3]
+        to = removeComma(to)
+        writeToBuf(getInstructionFromName(tokens[1]))
+        addr = parse(addr)
+        writeToBuf(getRegisterFromName(to))
+        writeToBuf(addr)
+        after = 4
     elseif string.upper(tokens[1]) == "STACK" then
         writeToBuf(getInstructionFromName(tokens[1]))
         writeToBufRaw(tokens[2])
@@ -328,6 +339,7 @@ compile = function(text, args)
         local ending = 0
         local tokensToParse = {}
         for i = 2, #tokens do
+            tokens[i] = string.gsub(tokens[i], "\\n", "\n")
             if string.find(tokens[i], [[\0]]) then
                 ending = i
                 tokens[i] = string.gsub(tokens[i], [[\0]], string.char(0x0))
@@ -335,9 +347,7 @@ compile = function(text, args)
             end
         end
         for i = 2, ending do
-            if string.find(tokens[i], [[\n]]) then
-                tokens[i] = string.gsub(tokens[i], [[\n]], "\n")
-            end
+            tokens[i] = string.gsub(tokens[i], [[\n]], "\n") 
         end
         if ending == 0 then
             throwNew("error", 4, "'" .. tokens[#tokens] .. "'")
@@ -383,6 +393,8 @@ compile = function(text, args)
                 _end = i
                 break
             else
+                tokens[i] = string.gsub(tokens[i], "\\0", "\0")
+                tokens[i] = string.gsub(tokens[i], "\\n", "\n")
                 table.insert(vtokens, tokens[i])
             end
         end

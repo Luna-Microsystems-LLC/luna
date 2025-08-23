@@ -75,6 +75,7 @@ local instructions = {
     MBYTE = 0x1b; 
     STN = 0x1c;
     STACK = 0x1d;
+    LDA = 0x1e;
 }
 
 local ignorelist = {
@@ -259,21 +260,26 @@ local function execLocation(name)
                 end
                 if _end == 0 then
                     return
-                end
-                setRegister(PC, offset)
+                end 
 
                 local start = offset
                 local finish = _end - 1
                 local startreal = offset
-                ::execfunc::
-                local newstart = execute(start, _end - 1, startreal)
+                ::execfunc:: 
+                local newstart = execute(start, finish, startreal)
+                
                 if tonumber(newstart) then
                     start = newstart
                     finish = finish
                     startreal = startreal
+                    if Verbose == true then
+                        Dump()
+                        print("Press ENTER to continue...")
+                        io.read("*l")
+                    end
                     goto execfunc
                 end
-                execute(offset, _end - 1, offset, true)
+                -- execute(offset, _end - 1, offset, true)
             end
         end
     end
@@ -394,7 +400,7 @@ execute = function(start, finish, startreal)
         table.insert(tokens, memory[i])
     end
 
-    local primary = tokens[1]
+    local primary = tokens[1] 
 
     if primary == nil then
         print(debug.traceback()); print("[FATAL]: Segmentation fault: Attempt access unallocated memory.")
@@ -469,10 +475,10 @@ execute = function(start, finish, startreal)
         end
         if loc ~= nil then
             if loc > finish then
-                print("[Alert]: Attempt jump past program finish.")
+                --print("[Alert]: Attempt jump past program finish.")
             end
-            setRegister(PC, startreal + loc)
-            return startreal + loc
+            setRegister(PC, startreal + 2)
+            return startreal + 2
         else
             execLocation(getValueFromRegister(0x4))
         end
@@ -493,9 +499,19 @@ execute = function(start, finish, startreal)
         end
 
         if not _tonumber(valfirst, true) or not _tonumber(valsecond, true) then
-            -- Symbols
-            print("CMP")
-            if (lookupSymbol(valfirst) == lookupSymbol(valsecond)) then
+            -- Symbols 
+            local rfirst = lookupSymbol(valfirst, true)
+            local rsecond = lookupSymbol(valsecond, true)
+
+            if not rfirst then
+                rfirst = getValueFromRegister(string.byte(valfirst))
+            end
+
+            if not rsecond then
+                rsecond = getValueFromRegister(string.byte(valsecond))
+            end
+
+            if (rfirst == rsecond) then
                 setRegister(0x05, 1)
             else
                 setRegister(0x05, 0)
@@ -537,10 +553,10 @@ execute = function(start, finish, startreal)
 
             if loc ~= nil then
                 if loc > finish then
-                    print("[Alert]: Attempt jump past program finish.")
+                    --print("[Alert]: Attempt jump past program finish.")
                 end
-                setRegister(PC, startreal + loc)
-                return startreal + loc
+                setRegister(PC, startreal + 2)
+                return startreal + 2
             else
                 execLocation(getValueFromRegister(0x4))
             end
@@ -571,10 +587,10 @@ execute = function(start, finish, startreal)
 
             if loc ~= nil then
                 if loc > finish then
-                    print("[Alert]: Attempt jump past program finish.")
+                    --print("[Alert]: Attempt jump past program finish.")
                 end
-                setRegister(PC, startreal + loc)
-                return startreal + loc
+                setRegister(PC, startreal + 2)
+                return startreal + 2
             else
                 execLocation(getValueFromRegister(0x4))
             end
@@ -612,19 +628,41 @@ execute = function(start, finish, startreal)
         end
         setRegister(0xd, start)
         operands = 2
+    elseif string.byte(primary) == instructions.LDA then
+        local to = tokens[2]
+        local from = tokens[3]
+        local addr = nil
+        local ptr = 3
+ 
+        if getValueFromRegister(string.byte(from)) ~= "REGISTER_NOT_EXISTENT" then
+            -- Register
+            addr = getValueFromRegister(string.byte(from))
+        else
+            -- Symbol / number
+            local symbol = ""
+            while tokens[ptr] and not checkValid(string.byte(tokens[ptr])) do
+                symbol = symbol .. tokens[ptr]
+                ptr = ptr + 1
+            end
+            addr = _tonumber(symbol) 
+        end
+
+        setRegister(string.byte(to), memory[addr])
+        operands = 2 
     end
 
-    local newoffset = start + operands + 1
-    setRegister(PC, newoffset)
+    local newoffset = start + operands + 1 
     local sel = 0
     if newoffset <= finish then
         if checkValid(string.byte(memory[newoffset])) == false then
             for i = newoffset + 1, #memory do
-                if checkValid(string.byte(memory[i])) == true then
+                if checkValid(string.byte(memory[i])) == true then 
+                    setRegister(PC, newoffset)
                     return i
                 end
             end
-        else
+        else 
+            setRegister(PC, newoffset)
             return newoffset
         end
     end
