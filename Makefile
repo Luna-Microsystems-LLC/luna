@@ -1,5 +1,6 @@
 LUAC=env luac
 LUA=env lua
+LRK=env luarocks
 SRC=./
 
 all: luna lasm lcc
@@ -10,7 +11,7 @@ luna: $(SRC)/luna.lua
 	sudo $(LUAC) -o /usr/local/bin/lvm/luna $(SRC)/luna.lua
 	sudo printf '#!/bin/sh\n $(LUA) /usr/local/bin/lvm/luna "$$@"' >> /usr/local/bin/luna
 	sudo chmod +x /usr/local/bin/luna
-
+	$(LRK) show linenoise > /dev/null 2>&1 || sudo $(LRK) install linenoise	
 
 lasm: $(SRC)/lasm.lua
 	sudo mkdir -p /usr/local/bin/lvm

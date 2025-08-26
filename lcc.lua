@@ -100,7 +100,9 @@ local errors = {
     [33] = "Reference to undefined/implicit variable/function",
     [34] = "Unused variable/function",
     [35] = "LASM not found",
-    [36] = "Assembling program failed"
+    [36] = "Assembling program failed",
+    [37] = "Attempt redeclare undefined variable",
+    [38] = "Length overflow"
 }
 
 local reserved_varnames = {
@@ -137,16 +139,18 @@ for i = 0, 12 do
         name = "r" .. i,
         type = "any",
         ignoreunused = true,
+        scope = 0,
     })
     table.insert(variables, {
         name = "t" .. i,
         type = "any",
         ignoreunused = true,
+        scope = 0,
     })
 end
-table.insert(variables, { name = "pc", type = "any", ignoreunused = true, })
-table.insert(variables, { name = "ptr", type = "any", ignoreunused = true, })
-table.insert(variables, { name = "sp", type = "any", ignoreunused = true, })
+table.insert(variables, { name = "pc", type = "any", ignoreunused = true, scope = 0, })
+table.insert(variables, { name = "ptr", type = "any", ignoreunused = true, scope = 0, })
+table.insert(variables, { name = "sp", type = "any", ignoreunused = true, scope = 0, })
 
 local function tohex16(n)
     return string.format("%04X", n & 0xFFFF)
@@ -308,6 +312,18 @@ local function rebuildBuffer()
     buffer = buffer .. "; Definitions ;\n\n" .. defs .. "\n\n; Functions ;\n\n" .. funcs_ .. "\n\n; Code ;\n\n" .. code 
 end
 
+local scopes = {
+    {0, nil}
+}
+
+local cscope = 1
+
+local function createScope(parent)
+    table.insert(scopes, {cscope, parent})
+    local _scope = cscope
+    cscope = cscope + 1
+    return _scope
+end
 local function parseDef(tokens)
     -- assume structure is like ", Hello, world, "
     local function rebuild(Table)
@@ -352,22 +368,43 @@ local function parseDef(tokens)
     end
 end
 
-local function findVariable(name)
+local function findVariable(name, scope)
+    local function findParent(scope)
+        for i = 1, #scopes do
+            if scopes[i][1] == scope then
+                return scopes[i][2]
+            end
+        end
+    end
     for _, variable in pairs(variables) do
         if variable.name == name then
-            variable.used = true
-            return variable
+            if variable.scope == scope then
+                variable.used = true
+                return variable
+            else
+                local parent = findParent(scope)
+                while parent ~= nil do
+                    if variable.scope == parent then
+                        variable.used = true
+                        return variable
+                    else
+                        parent = findParent(parent)
+                    end
+                end
+            end
         end
     end
     return nil
 end
 
-local function resolveVariables(args)
+local function resolveVariables(args, scope)
     for i, argument in pairs(args) do
-        local variable = findVariable(argument.value)
+        local variable = findVariable(argument.value, scope)
         if variable then
             if variable.type == "char_ptr" then
-                args[i].value = variable.address 
+                args[i].value = variable.address
+            elseif variable.type == "func" then
+                args[i].value = "t9"
             end
         elseif not variable and argument.type == "identifier" then
             if not table.find(arg, "--allow-implicit") then
@@ -383,7 +420,7 @@ end
 local tokens_ = {}
 local level = 0
 local TORETURN = nil
-function compile(start, finish, _tokens, where)
+local function compile(start, finish, _tokens, where, scope)
     local tokens = {}
     where = where or "code"
     if _tokens == nil then
@@ -403,11 +440,40 @@ function compile(start, finish, _tokens, where)
         if tokens[i] == nil then
             break
         end
-        local token = tokens[i]
+        local token = tokens[i] 
 
-        if token.type == "keyword" and vtype[token.value] then
+        if token.type == "identifier" and tokens[i + 1].value == "=" then
+            local _end = 0
+            local vtokens = {}
+            for j = i + 2, finish do
+                if tokens[j].value == ";" then
+                    _end = j
+                    break
+                else
+                    table.insert(vtokens, tokens[j])
+                end 
+            end
+
+            local var_name = token.value
+            local variable = findVariable(var_name, scope) 
+
+            if not variable then
+                throw(37, "'" .. var_name .. "'")
+            end
+
+            if variable.type == "char_ptr" then 
+                local value = string.gsub(parseDef(vtokens), "\\0", "") .. "\0"
+                if string.len(value) > variable.length then
+                    throw(38, "for variable '" .. var_name .. "'", "warning") 
+                end
+                write(where, "mov r0, " .. variable.address)
+                write(where, "add r0, r0, sp")
+                write(where, "mbyte r0, [ " .. value .. " ]")
+            end
+            next = _end + 1
+        elseif token.type == "keyword" and vtype[token.value] then
             if level ~= 0 then
-                throw(23)
+                -- throw(23)
             end
             local var_name = tokens[i + 1].value
 
@@ -435,21 +501,42 @@ function compile(start, finish, _tokens, where)
                     table.insert(variables, {
                         name = var_name,
                         type = "int",
+                        scope = scope
                     })
                     write("defs", var_name .. ": dw" .. tohex16(tokens[i + 3].value) .. " :" .. var_name)
                 elseif token.value == "char*" then
-                    table.insert(variables, {
-                        name = var_name,
-                        type = "char_ptr",
-                        address = STACK_OFFSET
-                    })
                     local content = string.gsub(parseDef(vtokens), "\\0", "")
                     content = string.gsub(content, "\0", "")
                     content = content .. "\0"
+                    table.insert(variables, {
+                        name = var_name,
+                        type = "char_ptr",
+                        address = STACK_OFFSET,
+                        scope = scope,
+                        length = string.len(content)
+                    })
                     write(where, "mov r0, " .. STACK_OFFSET)
                     write(where, "add r0, r0, sp")
                     write(where, "mbyte r0, [ " .. content .. " ]")
                     STACK_OFFSET = STACK_OFFSET + string.len(content)
+                elseif token.value == "void" then
+                    if tokens[i + 4].value == "(" then
+                        table.insert(variables, {
+                            name = var_name,
+                            type = "func",
+                            scope = scope
+                        })
+                        local ftokens = {}
+                        local __end = 0
+                        for j = i + 3, _end do
+                            table.insert(ftokens, tokens[j]) 
+                            if tokens[j].value == ";" then
+                                __end = j
+                                break
+                            end
+                        end
+                        compile(1, #ftokens, ftokens, where, scope) 
+                    end
                 end 
  
                 next = _end + 1
@@ -521,9 +608,10 @@ function compile(start, finish, _tokens, where)
             if var_name == "main" then
                 cwhere = "code"
             end
- 
+
+            local newScope = createScope(scope)
             level = 1
-            compile(1, #ftokens, ftokens, cwhere)
+            compile(1, #ftokens, ftokens, cwhere, newScope)
             level = 0
 
             if var_name ~= "main" then
@@ -559,7 +647,7 @@ function compile(start, finish, _tokens, where)
                 filename = string.gsub(filename, "[\\0%s]", "")
                 if string.find(filename, ".asm$") then
                     write("defs", ";- include " .. filename)
-                elseif string.find(filename, ".c$") then
+                elseif string.find(filename, ".c$") or string.find(filename, ".h$") then
                     local file = io.open(filename, 'r')
                     if not file then
                         error("File could not be opened '" .. filename .. "'")
@@ -567,7 +655,7 @@ function compile(start, finish, _tokens, where)
                     local contents = file:read("a")
                     file:close()
                     local __tokens = tokenize(contents)
-                    compile(1, #__tokens, __tokens)
+                    compile(1, #__tokens, __tokens, nil, 0)
                 else
                     throw(18, filename)
                 end
@@ -585,7 +673,7 @@ function compile(start, finish, _tokens, where)
                     end
                 end
                 if _end == 0 then
-                    throw(9)
+                    throw(9, ", near" .. table.concat(vtokens, ' '))
                 end
 
                 local value = parseDef(vtokens)
@@ -598,7 +686,8 @@ function compile(start, finish, _tokens, where)
 
                 table.insert(variables, {
                     name = var_name,
-                    type = "label"
+                    type = "label",
+                    scope = 0,
                 })
 
                 next = _end + 1
@@ -688,8 +777,8 @@ function compile(start, finish, _tokens, where)
                     throw(25)
                 end
 
-                exptokens = resolveVariables(exptokens)
-                restokens = resolveVariables(restokens)
+                exptokens = resolveVariables(exptokens, scope)
+                restokens = resolveVariables(restokens, scope)
 
                 -- Handle code part
                 local cdepth = 0
@@ -731,7 +820,8 @@ function compile(start, finish, _tokens, where)
                 end
 
                 write("funcs", ":lcc_" .. tostring(tempcounter) .. ":")
-                compile(1, #ftokens, ftokens, "funcs")
+                local newScope = createScope(scope)
+                compile(1, #ftokens, ftokens, "funcs", scope)
                 write("funcs", ":lcc_" .. tostring(tempcounter) .. ":")
 
                 write(where, "mov t7, " .. exptokens[1].value)
@@ -801,7 +891,7 @@ function compile(start, finish, _tokens, where)
                 ::continue::
             end
 
-            args = resolveVariables(args)
+            args = resolveVariables(args, scope)
 
             if #args > 6 then
                 throw(20)   
@@ -829,7 +919,7 @@ function compile(start, finish, _tokens, where)
 
             next = aend + 2
         else
-            print(tokens[i - 1].value or "")
+            -- print(tokens[i - 1].value or "")
             print(tokens[i].value)
             print(tokens[i + 1].value or "")
             throw(3)
@@ -854,7 +944,7 @@ local contents = _infile:read("a")
 _infile:close()
 tokens_ = tokenize(contents)
 
-compile(1, #tokens_, tokens_)
+compile(1, #tokens_, tokens_, nil, 0)
 
 if STACK_SIZE > 0 then
     write("defs", "stack " .. STACK_SIZE, true)
@@ -873,8 +963,6 @@ for _, variable in pairs(variables) do
 end
 
 rebuildBuffer()
-
-
 
 if table.find(arg, "-e") then
     if os.getenv("OS") ~= "Windows_NT" then
@@ -897,15 +985,19 @@ if table.find(arg, "-e") then
     end
     file:write(buffer)
     file:close()
+    local function deleteTemp()
+        if os.getenv("OS") ~= "Windows_NT" then
+            os.execute("rm " .. filename)
+        else
+            os.execute("del " .. filename)
+        end
+    end
     local _, __, returnvalue = os.execute("lasm " .. filename .. " " .. outfile)
     if tonumber(returnvalue) ~= 0 then
+        deleteTemp()
         throw(36)
     end
-    if os.getenv("OS") ~= "Windows_NT" then
-        os.execute("rm " .. filename)
-    else
-        os.execute("del " .. filename)
-    end
+    deleteTemp() 
 else
     local _outfile = io.open(outfile, "w")
     if not _outfile then

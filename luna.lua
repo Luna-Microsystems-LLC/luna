@@ -13,8 +13,13 @@ local contents = file:read("*a")
 file:close()
 ]]--
 
+-- Include dependencies
+local linenoise = require("linenoise")
+
+-- Variables
 local execute
 local memory = {} -- 65,535 byte maximum
+local ogimg = {}
 local registers = {
     {0x0, "R0", nil},
     {0x1, "R1", nil},
@@ -72,10 +77,10 @@ local instructions = {
     FEND = 0x18;
     JZ = 0x19;
     DW = 0x1a;
-    MBYTE = 0x1b; 
-    STN = 0x1c;
-    STACK = 0x1d;
-    LDA = 0x1e;
+    MBYTE = 0x1c; 
+    STN = 0x1d;
+    STACK = 0x1e;
+    LDA = 0x1f;
 }
 
 local ignorelist = {
@@ -149,7 +154,7 @@ local function _tonumber(number, silent)
 
     if not n then
         if not silent then
-            print(debug.traceback()); print("[FATAL]: Invalid number")
+            print(debug.traceback()); print("[FATAL]: Invalid number '" .. number .. "'")
             Dump()
             os.exit(1)
         end
@@ -324,7 +329,7 @@ local function syscallHandler()
                 msg = msg .. (memory[i] or "\0")
             end
         end
-        io.write(msg)
+        io.write(msg) 
     elseif func == 0x2 then
         -- Allocating memory
         local start = getValueFromRegister(0x02)
@@ -371,6 +376,97 @@ local function syscallHandler()
             code = 0
         end
         os.exit(code)
+    elseif func == 0x5 then
+        -- Save to disk
+        local contents = getValueFromRegister(0x02)
+        local startaddr = _tonumber(getValueFromRegister(0x03))
+        if lookupSymbol(contents, true) then
+            contents = lookupSymbol(contents)
+        end
+
+        local fnull = #ogimg + 1
+
+        for i = fnull, startaddr - 1 do
+            ogimg[i] = "\0"
+        end
+
+        for i = 1, #contents do
+            ogimg[startaddr + (i - 1)] = string.sub(contents, i, i)
+        end
+        
+        local image = table.concat(ogimg, '')
+
+        local infile = arg[1]
+
+        local _infile = io.open(infile, 'w')
+        _infile:write(image)
+        _infile:close()
+    elseif func == 0x6 then
+        local prefillText = getValueFromRegister(0x02)
+
+        if not _tonumber(prefillText, true) then
+            if lookupSymbol(prefillText, true) then
+                prefillText = lookupSymbol(prefillText)
+            end
+        else
+            prefillText = _tonumber(prefillText) 
+            local bytes = ""
+            for i = prefillText, #memory do
+                bytes = bytes .. memory[i]
+                if memory[i] == "\0" then
+                    break
+                end
+            end
+
+            prefillText = bytes
+        end
+
+        local line = ""
+
+        if os.getenv("OS") ~= "Windows_NT" then
+            local prom
+            local buffer = { prefillText:byte(1, #prefillText) }
+            local cursor = #buffer + 1
+
+            io.write(prefillText)
+            io.flush()
+
+            os.execute("stty raw -echo")
+            while true do
+                local c = io.read(1)
+                local b = string.byte(c)
+
+                if b == 13 then
+                    break
+                elseif b == 127 then
+                    if cursor > 1 then
+                        table.remove(buffer, cursor - 1)
+                        cursor = cursor - 1
+                        io.write("\27[2K\r" .. string.char(table.unpack(buffer)))
+                        io.write("\27[" .. (cursor) .. "G")
+                        io.flush()
+                    end
+                else
+                    table.insert(buffer, cursor, b)
+                    cursor = cursor + 1
+                    io.write("\27[2K\r" .. string.char(table.unpack(buffer)))
+                    io.write("\27[" .. (cursor) .. "G")
+                    io.flush()
+                end
+            end
+            os.execute("stty sane")
+            io.write("\n")
+
+            line = string.char(table.unpack(buffer))  
+        else
+            print("\27[33mThis VM feature is not available on Windows. Input discarded.\27[0m")
+        end
+
+        if line then
+            setRegister(0x02, string.gsub(line, "\0", "") .. "\0")
+        else
+            setRegister(0x02, " ")
+        end
     end
 end
 
@@ -448,7 +544,7 @@ execute = function(start, finish, startreal)
         setRegister(string.byte(to), rval)
         operands = 2
     elseif string.byte(primary) == instructions.MBYTE then
-        -- syntax: mbyte 0x100
+        -- syntax: mbyte 0x100 
         local addr = _tonumber(getValueFromRegister(string.byte(tokens[2])))
         local _end = 0 
         local ptr = 3
@@ -617,10 +713,10 @@ execute = function(start, finish, startreal)
     elseif string.byte(primary) == instructions.STACK then
         local ptr = 2
         local bytes = ""
-        while tokens[ptr] and not checkValid(string.byte(tokens[ptr]), start + ptr) do
+        while tokens[ptr] and _tonumber(tokens[ptr], true) do
             bytes = bytes .. tokens[ptr]
             ptr = ptr + 1
-        end
+        end 
         size = _tonumber(bytes)
         local start = getValueFromRegister(0x1b) + 1
         for i = start, start + bytes do
@@ -630,25 +726,18 @@ execute = function(start, finish, startreal)
         operands = 2
     elseif string.byte(primary) == instructions.LDA then
         local to = tokens[2]
-        local from = tokens[3]
-        local addr = nil
-        local ptr = 3
- 
-        if getValueFromRegister(string.byte(from)) ~= "REGISTER_NOT_EXISTENT" then
-            -- Register
-            addr = getValueFromRegister(string.byte(from))
-        else
-            -- Symbol / number
-            local symbol = ""
-            while tokens[ptr] and not checkValid(string.byte(tokens[ptr])) do
-                symbol = symbol .. tokens[ptr]
-                ptr = ptr + 1
-            end
-            addr = _tonumber(symbol) 
-        end
+        local saddr = _tonumber(getValueFromRegister(0x02))
+        local eaddr = _tonumber(getValueFromRegister(0x03))
 
-        setRegister(string.byte(to), memory[addr])
-        operands = 2 
+        local bytes = ""
+        for i = saddr, eaddr do
+            bytes = bytes .. memory[i]
+        end
+        if _tonumber(bytes, true) then
+            bytes = _tonumber(bytes)
+        end
+        setRegister(string.byte(to), bytes)
+        operands = 1
     end
 
     local newoffset = start + operands + 1 
@@ -679,6 +768,7 @@ file:close()
 
 for i = 1, #contents do
     loadMemory(string.sub(contents, i, i))
+    ogimg[i] = string.sub(contents, i, i)
 end
 
 local RLFile = ""

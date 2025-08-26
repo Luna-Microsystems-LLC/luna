@@ -127,10 +127,10 @@ local instructions = {
     FEND = 0x18;
     JZ = 0x19;
     DW = 0x1a;
-    MBYTE = 0x1b; 
-    STN = 0x1c;
-    STACK = 0x1d;
-    LDA = 0x1e;
+    MBYTE = 0x1c; 
+    STN = 0x1d;
+    STACK = 0x1e;
+    LDA = 0x1f;
 }
 
 local function getInstructionFromName(ins)
@@ -232,14 +232,10 @@ compile = function(text, args)
         writeToBuf(from)
         after = 4
     elseif string.upper(tokens[1]) == "LDA" then
-        local to = tokens[2]
-        local addr = tokens[3]
-        to = removeComma(to)
+        local to = tokens[2]  
         writeToBuf(getInstructionFromName(tokens[1]))
-        addr = parse(addr)
         writeToBuf(getRegisterFromName(to))
-        writeToBuf(addr)
-        after = 4
+        after = 3
     elseif string.upper(tokens[1]) == "STACK" then
         writeToBuf(getInstructionFromName(tokens[1]))
         writeToBufRaw(tokens[2])
@@ -347,7 +343,8 @@ compile = function(text, args)
             end
         end
         for i = 2, ending do
-            tokens[i] = string.gsub(tokens[i], [[\n]], "\n") 
+            tokens[i] = string.gsub(tokens[i], [[\n]], "\n")
+            tokens[i] = string.gsub(tokens[i], [[\27]], "\27")
         end
         if ending == 0 then
             throwNew("error", 4, "'" .. tokens[#tokens] .. "'")
