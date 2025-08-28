@@ -1,20 +1,9 @@
---[[
-functions:
-print (1 in r1) message in r2
-]]
---[[
-local infile = arg[1]
-
-if not infile then error("Please specify a program to execute") end
-
-local file = io.open(infile, "r")
-if not file then error("could not open file") end
-local contents = file:read("*a")
-file:close()
-]]--
-
--- Include dependencies
-local linenoise = require("linenoise")
+if os.getenv("OS") ~= "Windows_NT" then
+    io.write("\27]0;Luna VM Runtime\7")
+    io.flush()
+else
+    os.execute("title \"Luna VM Runtime\"")
+end
 
 -- Variables
 local execute
@@ -45,10 +34,10 @@ local registers = {
     {0x15, "T7", nil},
     {0x16, "T8", nil},
     {0x17, "T9", nil},
-    {0x18, "T10", nil},
-    {0x19, "T11", nil},
-    {0x1a, "T12", nil},
-    {0x1b, "PTR", 0}
+    {0x19, "T10", nil},
+    {0x1a, "T11", nil},
+    {0x1b, "T12", nil},
+    {0x1c, "PTR", 0}
 }
 local PC = 0xe
 local instructions = {
@@ -81,6 +70,11 @@ local instructions = {
     STN = 0x1d;
     STACK = 0x1e;
     LDA = 0x1f;
+    IGT = 0x7f;
+    ILT = 0x80;
+    IET = 0x81;
+    IGET = 0x82;
+    ILET = 0x83;
 }
 
 local ignorelist = {
@@ -98,6 +92,15 @@ local ignorelist = {
 }
 local RunningLog = false
 local Verbose = false
+
+local function sleep(_time)
+    if not tonumber(_time) then return end
+    if os.getenv("OS") ~= "Windows_NT" then
+        os.execute("sleep " .. _time)
+    else
+        os.execute("timeout /t " .. _time .. " > NUL")
+    end
+end
 
 local function Dump(file)
     if Verbose == true then
@@ -160,8 +163,7 @@ local function _tonumber(number, silent)
         end
         return nil
     end
-
-    -- clamp to signed 16-bit range
+ 
     if n > 0x7FFF then
         n = n - 0x10000
     elseif n < -0x8000 then
@@ -392,6 +394,7 @@ local function syscallHandler()
 
         for i = 1, #contents do
             ogimg[startaddr + (i - 1)] = string.sub(contents, i, i)
+            memory[startaddr + (i - 1)] = string.sub(contents, i, i)
         end
         
         local image = table.concat(ogimg, '')
@@ -420,6 +423,8 @@ local function syscallHandler()
 
             prefillText = bytes
         end
+
+        prefillText = (prefillText or "")
 
         local line = ""
 
@@ -457,15 +462,16 @@ local function syscallHandler()
             os.execute("stty sane")
             io.write("\n")
 
-            line = string.char(table.unpack(buffer))  
+            line = string.char(table.unpack(buffer)) 
         else
             print("\27[33mThis VM feature is not available on Windows. Input discarded.\27[0m")
         end
 
         if line then
-            setRegister(0x02, string.gsub(line, "\0", "") .. "\0")
+            local word = convertToWord(string.gsub(line, "\0", "") .. "\0")
+            setRegister(0x02, word)
         else
-            setRegister(0x02, " ")
+            setRegister(0x02, "")
         end
     end
 end
@@ -569,10 +575,7 @@ execute = function(start, finish, startreal)
         else
             return
         end
-        if loc ~= nil then
-            if loc > finish then
-                --print("[Alert]: Attempt jump past program finish.")
-            end
+        if loc ~= nil then 
             setRegister(PC, startreal + 2)
             return startreal + 2
         else
@@ -692,13 +695,13 @@ execute = function(start, finish, startreal)
             end
         end
         operands = 1
-    elseif string.byte(primary) == instructions.ADD then
+    elseif string.byte(primary) == instructions.ADD then 
         local to = string.byte(tokens[2])
         local first = getValueFromRegister(string.byte(tokens[3]))
         local second  = getValueFromRegister(string.byte(tokens[4]))
 
         if first == "REGISTER_NOT_EXISTENT" or second == "REGISTER_NOT_EXISTENT" then
-            print(debug.traceback()); print("[FATAL]: Register does not exist at " .. getValueFromRegister(PC))
+            print(debug.traceback()); print("[FATAL]: Register does not exist: " .. tokens[3] .. " " .. tokens[4])
             Dump()
             os.exit(1)
         end
@@ -738,6 +741,56 @@ execute = function(start, finish, startreal)
         end
         setRegister(string.byte(to), bytes)
         operands = 1
+    elseif string.byte(primary) == instructions.IGT then
+        local one = _tonumber(getValueFromRegister(string.byte(tokens[2])))
+        local two = _tonumber(getValueFromRegister(string.byte(tokens[3])))
+
+        if one > two then
+            setRegister(0x05, 1)
+        else
+            setRegister(0x05, 0)
+        end
+        operands = 2
+    elseif string.byte(primary) == instructions.ILT then
+        local one = _tonumber(getValueFromRegister(string.byte(tokens[2])))
+        local two = _tonumber(getValueFromRegister(string.byte(tokens[3])))
+
+        if one < two then
+            setRegister(0x05, 1)
+        else
+            setRegister(0x05, 0)
+        end
+        operands = 2
+    elseif string.byte(primary) == instructions.IET then
+        local one = _tonumber(getValueFromRegister(string.byte(tokens[2])))
+        local two = _tonumber(getValueFromRegister(string.byte(tokens[3])))
+
+        if one == two then
+            setRegister(0x05, 1)
+        else
+            setRegister(0x05, 0)
+        end
+        operands = 2
+    elseif string.byte(primary) == instructions.IGET then
+        local one = _tonumber(getValueFromRegister(string.byte(tokens[2])))
+        local two = _tonumber(getValueFromRegister(string.byte(tokens[3])))
+
+        if one >= two then
+            setRegister(0x05, 1)
+        else
+            setRegister(0x05, 0)
+        end
+        operands = 2
+    elseif string.byte(primary) == instructions.ILET then
+        local one = _tonumber(getValueFromRegister(string.byte(tokens[2])))
+        local two = _tonumber(getValueFromRegister(string.byte(tokens[3])))
+
+        if one <= two then
+            setRegister(0x05, 1)
+        else
+            setRegister(0x05, 0)
+        end
+        operands = 2
     end
 
     local newoffset = start + operands + 1 
@@ -787,6 +840,9 @@ setRegister(0x1b, #contents)
 local start = 1
 local finish = #contents
 local startreal = 1
+
+local _time = 0
+local stop = false
 ::exec::
 local newstart = execute(start, #contents, startreal)
 if tonumber(newstart) then
@@ -802,7 +858,7 @@ if tonumber(newstart) then
     end
     start = newstart
     finish = finish
-    startreal = startreal
+    startreal = startreal 
     goto exec
 end
 Dump()

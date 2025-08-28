@@ -23,10 +23,10 @@ local registers = {
     {0x15, "T7"},
     {0x16, "T8"},
     {0x17, "T9"},
-    {0x18, "T10"},
-    {0x19, "T11"},
-    {0x1a, "T12"},
-    {0x1b, "PTR"}
+    {0x19, "T10"},
+    {0x1a, "T11"},
+    {0x1b, "T12"},
+    {0x1c, "PTR"}
 }
 
 local errors = {
@@ -38,7 +38,8 @@ local errors = {
     [6] = "Function is not closed",
     [7] = "Invalid preprocessor argument",
     [8] = "Invalid number",
-    [9] = "[ expected"
+    [9] = "[ expected",
+    [10] = "Output machine code too big"
 }
 
 local outbuffer = ""
@@ -131,7 +132,14 @@ local instructions = {
     STN = 0x1d;
     STACK = 0x1e;
     LDA = 0x1f;
+    IGT = 0x7f;
+    ILT = 0x80;
+    IET = 0x81;
+    IGET = 0x82;
+    ILET = 0x83;
 }
+
+local padto = 0
 
 local function getInstructionFromName(ins)
     ins = string.upper(ins)
@@ -264,6 +272,9 @@ compile = function(text, args)
             local contents = file:read("a")
             file:close()
             compile(contents, { filename = filename })
+            after = 4
+        elseif tokens[2] == "size" then
+            padto = (tonumber(tokens[3]) or throwNew("error", 8))
             after = 4
         else
             throwNew("error", 7, tokens[2])
@@ -403,6 +414,15 @@ compile = function(text, args)
 
         writeToBufRaw(str)
         after = _end + 1
+    elseif string.upper(tokens[1]) == "IGT" or string.upper(tokens[1]) == "ILT" or string.upper(tokens[1]) == "IET" or string.upper(tokens[1]) == "IGET" or string.upper(tokens[1]) == "ILET" then
+        writeToBuf(getInstructionFromName(tokens[1]))
+        local one = tokens[2]
+        local two = tokens[3]
+        one = removeComma(one)
+
+        writeToBuf(getRegisterFromName(one))
+        writeToBuf(getRegisterFromName(two))
+        after = 4
     elseif string.find(tokens[1], ":") and string.find(tokens[1], ":") == #tokens[1] then
         tokens[1] = string.gsub(tokens[1], ":", "")
         if string.find(tokens[1], ":") then
@@ -494,6 +514,16 @@ if not file then error("File not found") end
 local content = file:read("*a")
 file:close()
 compile(content, { filename = infile })
+
+if padto ~= 0 then
+    if string.len(outbuffer) > padto then
+        throwNew("error", 10) 
+    elseif string.len(outbuffer) < padto then
+        for i = string.len(outbuffer), padto do
+            outbuffer = outbuffer .. "\0"
+        end
+    end
+end
 
 local file = io.open(outfile, "w")
 if not file then error("Could not create file") end

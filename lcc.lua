@@ -29,7 +29,8 @@ local keywords = {
     ["define"] = true,
     ["include"] = true,
     ["pragma"] = true,
-    ["return"] = true, 
+    ["return"] = true,
+    ["else"] = true,
 }
 
 local vtype = {
@@ -43,12 +44,16 @@ local operator_s = {
     ["+"] = true,
     ["-"] = true,
     ["*"] = true,
-    ["/"] = true, 
+    ["/"] = true,
+    [">"] = true,
+    ["<"] = true,
 }
 
 local operator_d = {
     ["=="] = true, 
-    ["!="] = true
+    ["!="] = true,
+    [">="] = true,
+    ["<="] = true,
 }
 
 local symbols = {
@@ -141,12 +146,14 @@ for i = 0, 12 do
         ignoreunused = true,
         scope = 0,
     })
-    table.insert(variables, {
-        name = "t" .. i,
-        type = "any",
-        ignoreunused = true,
-        scope = 0,
-    })
+    if i ~= 0 then
+        table.insert(variables, {
+            name = "t" .. i,
+            type = "any",
+            ignoreunused = true,
+            scope = 0,
+        })
+    end
 end
 table.insert(variables, { name = "pc", type = "any", ignoreunused = true, scope = 0, })
 table.insert(variables, { name = "ptr", type = "any", ignoreunused = true, scope = 0, })
@@ -216,7 +223,7 @@ local function tokenize(text)
                 while peek() ~= "\n" do advance() end
                 advance()
             else
-                advance()
+                table.insert(tokens, { type = "operator", value = c }) 
             end
         elseif operator_d[peek(1)] then
             table.insert(tokens, { type = "operator", value = peek(1) })
@@ -710,6 +717,9 @@ local function compile(start, finish, _tokens, where, scope)
                         type = "any"
                     })
                     _end = i + 3
+                elseif tokens[i + 1].value == "__force_size__" then
+                    write("defs" ,";- size " .. tokens[i + 2].value) 
+                    _end = i + 3
                 elseif tokens[i + 1].value == "point" then
                     write(where, "mov t12, pc")
                     write(where, "nop")
@@ -757,7 +767,7 @@ local function compile(start, finish, _tokens, where, scope)
                 local split = 0
                 local exp = ""
                 for j = 1, #condtokens do
-                    if condtokens[j].value == "==" or condtokens[j].value == "!=" then
+                    if operator_d[condtokens[j].value] or condtokens[j].value == ">" or condtokens[j].value == "<" then
                         split = j
                         exp = condtokens[j].value
                         break
@@ -788,12 +798,16 @@ local function compile(start, finish, _tokens, where, scope)
                     cdepth = 1
                 end
 
+                local tend = 0
                 local fend = 0
+                local eend = 0
+
                 local ftokens = {}
+                local etokens = {}
+
                 for j = condend + 2, finish do
                     if tokens[j].value == "}" then
                         cdepth = cdepth - 1
-
                         if cdepth == 0 then
                             fend = j
                             break
@@ -807,31 +821,106 @@ local function compile(start, finish, _tokens, where, scope)
                         table.insert(ftokens, tokens[j])
                     end
                 end
+
                 if fend == 0 then
                     throw(7)
                 end
 
-                local op = ""
+                local isElse = false
 
-                if exp == "==" then
-                    op = "jnz"
-                elseif exp == "!=" then
-                    op = "jz"
+                if tokens[fend + 1] and tokens[fend + 1].value == "else" then
+                    isElse = true
+                    local cdepth = 0
+                    if tokens[fend + 2].value ~= "{" then
+                        throw(6)
+                    else
+                        cdepth = 1
+                    end
+                    
+                    for k = fend + 3, finish do
+                        if tokens[k].value == "{" then
+                            cdepth = cdepth + 1
+                            table.insert(etokens, tokens[k])
+                        elseif tokens[k].value == "}" then
+                            cdepth = cdepth - 1
+                            if cdepth == 0 then
+                                eend = k
+                                break
+                            else
+                                table.insert(etokens, tokens[k])
+                            end
+                        else
+                            table.insert(etokens, tokens[k])
+                        end
+                    end
+
+                    if eend == 0 then
+                        throw(7)
+                    end
+
+                    tend = eend
+                else
+                    tend = fend
                 end
 
+                local method = ""
+                local op = ""
+                local op_reverse = ""
+
+                if exp == "==" then
+                    method = "cmp"
+                    op = "jnz"
+                    op_reverse = "jz"
+                elseif exp == "!=" then
+                    method = "cmp"
+                    op = "jz"
+                    op_reverse = "jnz"
+                elseif exp == ">" then
+                    method = "igt"
+                    op = "jnz"
+                    op_reverse = "jz"
+                elseif exp == "<" then
+                    method = "ilt"
+                    op = "jnz"
+                    op_reverse = "jz"
+                elseif exp == ">=" then
+                    method = "iget"
+                    op = "jnz"
+                    op_reverse = "jz"
+                elseif exp == "<=" then
+                    method = "ilet"
+                    op = "jnz"
+                    op_reverse = "jz"
+                end
+
+                local ifLoc = tempcounter
+                local elseLoc
                 write("funcs", ":lcc_" .. tostring(tempcounter) .. ":")
                 local newScope = createScope(scope)
-                compile(1, #ftokens, ftokens, "funcs", scope)
+                compile(1, #ftokens, ftokens, "funcs", newScope)
                 write("funcs", ":lcc_" .. tostring(tempcounter) .. ":")
+
+                if isElse == true then
+                    tempcounter = tempcounter + 1
+                    elseLoc = tempcounter
+                    write("funcs", ":lcc_" .. tostring(tempcounter) .. ":")
+                    local newScope = createScope(scope)
+                    compile(1, #etokens, etokens, "funcs", newScope)
+                    write("funcs", ":lcc_" .. tostring(tempcounter) .. ":")
+                end
 
                 write(where, "mov t7, " .. exptokens[1].value)
                 write(where, "mov t8, " .. restokens[1].value)
-                write(where, "mov r4, lcc_" .. tostring(tempcounter))
-                write(where, "cmp t7, t8")
+                write(where, "mov r4, lcc_" .. tostring(ifLoc))
+                write(where, method .. " t7, t8")
                 write(where, op .. " r5")
+                if isElse == true then
+                    write(where, "mov r4, lcc_" .. tostring(elseLoc))
+                    write(where, op_reverse .. " r5")
+                end
 
                 tempcounter = tempcounter + 1
-                next = fend + 1
+                next = tend + 1
             end
         elseif tokens[i].type == "identifier" and tokens[i + 1].value == "(" then
             -- Function call
@@ -862,6 +951,11 @@ local function compile(start, finish, _tokens, where, scope)
             if aend == 0 then
                 throw(5)
             end
+
+            if not tokens[aend + 1] then
+                throw(9)
+            end
+
             if tokens[aend + 1].value ~= ";" then
                 throw(9) -- cheap shot but it works LOL
             end
