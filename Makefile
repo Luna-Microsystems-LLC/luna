@@ -1,17 +1,19 @@
 LUAC=env luac
 LUA=env lua
-LRK=env luarocks
 SRC=./
+OS := $(shell uname -s)
 
-all: luna lasm lcc
-.PHONY = clean
+all: luna-l2 lasm lcc
+.PHONY = clean luna-l1
 
-luna: $(SRC)/luna.lua
+luna-l1:
 	sudo mkdir -p /usr/local/bin/lvm
-	sudo $(LUAC) -o /usr/local/bin/lvm/luna $(SRC)/luna.lua
-	sudo printf '#!/bin/sh\n $(LUA) /usr/local/bin/lvm/luna "$$@"' >> /usr/local/bin/luna
-	sudo chmod +x /usr/local/bin/luna
-	$(LRK) show linenoise > /dev/null 2>&1 || sudo $(LRK) install linenoise	
+	sudo $(LUAC) -o /usr/local/bin/lvm/luna-l1 $(SRC)/luna_l1.lua
+	sudo printf '#!/bin/sh\n $(LUA) /usr/local/bin/lvm/luna-l1 "$$@"' >> /usr/local/bin/luna-l1
+	sudo chmod +x /usr/local/bin/luna-l1
+
+luna-l2:
+	cd l2 && sudo go build -o /usr/local/bin/luna-l2 ./luna_l2.go
 
 lasm: $(SRC)/lasm.lua
 	sudo mkdir -p /usr/local/bin/lvm
@@ -26,7 +28,8 @@ lcc: $(SRC)/lcc.lua
 	sudo chmod +x /usr/local/bin/lcc
 
 clean:
-	sudo rm /usr/local/bin/luna
+	sudo rm /usr/local/bin/luna-l1
+	sudo rm /usr/local/bin/luna-l2
 	sudo rm /usr/local/bin/lasm
 	sudo rm /usr/local/bin/lcc
 	sudo rm -rf /usr/local/bin/lvm
