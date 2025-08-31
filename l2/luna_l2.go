@@ -20,11 +20,7 @@ Specs:
 65 KB memory
 Sound capabilities
 Big endian
-
-Supported host OSes:
-Linux x86_64
-MacOS x86_64
-Windows x86_64
+RISC-like architecture
 
 Copyright (c) 2025 Luna Microsystems LLC, under the Apache 2.0 license.
 */
@@ -43,15 +39,16 @@ import (
 	"bytes"
 	"io"
 	"runtime"
+	"bufio"
 )
 
 //go:embed sounds/crash.mp3
 var crashSoundData []byte
 
 type Register struct {
-	Address int16
+	Address uint16
 	Name string
-	Value int16
+	Value uint16
 }
 
 var Registers = []Register {
@@ -82,15 +79,11 @@ var Registers = []Register {
 	{0x0018, "T12", 0},
 	{0x0019, "SP", 0},
 	{0x001a, "PC", 0},
-	{0x001b, "PTR", 0},
 }
 
 var Memory[65535]byte
 
-func setRegister(address int16, value int16) {
-	if address == 0x001a {
-		value = int16(uint16(value))
-	}
+func setRegister(address uint16, value uint16) {	
     for i := range Registers {
         if Registers[i].Address == address {
             Registers[i].Value = value
@@ -99,7 +92,7 @@ func setRegister(address int16, value int16) {
     }
 }
 
-func getRegister(address int16) int16 {	
+func getRegister(address uint16) uint16 {	
 	for _, register := range Registers {
 		if register.Address == address {
 			return register.Value
@@ -131,22 +124,39 @@ func intHandler(code uint16) {
 	if code == 0x01 {
 		// BIOS print to screen
 		// start address in R1
-		addr := getRegister(0x0001)
+		char := getRegister(0x0001)
 
-		for i := uint16(addr); i <= 65535; i++ {
-			if int16(Memory[i]) != 0x00 {
-				fmt.Printf(string(rune(int16(Memory[i]))))	
-			} else {
-				break
-			}
+		fmt.Printf(string(rune(char)))
+	} else if code == 0x02 {
+		timeToSleep := getRegister(0x0001)
+
+		time.Sleep(time.Second * time.Duration(timeToSleep))
+	} else if code == 0x03 {
+		reader := bufio.NewScanner(os.Stdin)
+		if reader.Scan() {
+			line := reader.Text()
+			line = line
+			// copyMemory()
 		}
 	}
+}
+
+func stall(cycles int) {
+	clockHz := 1158000
+	cycleTime := int(time.Second) / clockHz
+	time.Sleep(time.Duration(cycleTime * cycles))
 }
 
 func execute() {
 	for {
 		ProgramCounter := getRegister(0x001a)
 		op := Memory[ProgramCounter]
+
+		if ProgramCounter == 0x0000 {
+			codesect := uint16(Memory[ProgramCounter]) << 8 | uint16(Memory[ProgramCounter + 1])
+			setRegister(0x001a, codesect)
+			continue
+		}
 	
 		switch op {
 		case 0x00:
@@ -157,14 +167,16 @@ func execute() {
             dst := Memory[ProgramCounter + 2]
 
             if mode == 0x01 {
-                imm := int16(Memory[ProgramCounter + 3])<<8 | int16(Memory[ProgramCounter + 4])
-                setRegister(int16(dst), imm)
+                imm := uint16(Memory[ProgramCounter + 3])<<8 | uint16(Memory[ProgramCounter + 4])
+                setRegister(uint16(dst), imm)
                 setRegister(0x001a, ProgramCounter + 5)	
             } else if mode == 0x02 {
-				frm := int16(Memory[ProgramCounter + 3])
-				setRegister(int16(dst), int16(getRegister(frm)))
+				frm := uint16(Memory[ProgramCounter + 3])
+				setRegister(uint16(dst), uint16(getRegister(frm)))
 				setRegister(0x001a, ProgramCounter + 4)
 			}
+
+			stall(4)
 		case 0x02:
 			// HLT
 			for {
@@ -176,57 +188,120 @@ func execute() {
 			mode := Memory[ProgramCounter + 1]
 
 			if mode == 0x01 {
-				loc := int16(Memory[ProgramCounter + 2]) << 8 | int16(Memory[ProgramCounter + 3])
+				loc := uint16(Memory[ProgramCounter + 2]) << 8 | uint16(Memory[ProgramCounter + 3])
 				setRegister(0x001a, loc)	
 			} else if mode == 0x02 {
-				frm := int16(Memory[ProgramCounter + 2])
+				frm := uint16(Memory[ProgramCounter + 2])
 				setRegister(0x001a, getRegister(frm))
 			}
+			stall(8)
 		case 0x04:
 			// INT	
 			code := uint16(Memory[ProgramCounter + 1]) << 8 | uint16(Memory[ProgramCounter + 2])	
 			intHandler(code)
 			setRegister(0x001a, ProgramCounter + 3)
+			stall(34)
 		case 0x05:
-			// DSTART	
-			// Indicates label
-			for i := uint16(ProgramCounter + 1); i < 65535; i++ {
-				if uint16(Memory[i]) == 0x07 {
-					setRegister(0x001a, int16(i + 1))
-					break
-				}
-			}
-		case 0x06:
-			// DSEP
-			setRegister(0x001a, ProgramCounter + 1)
-		case 0x07:
-			// DEND
-			setRegister(0x001a, ProgramCounter + 1)
-		case 0x08:
 			// JNZ
 			// jnz <mode (01 or 02)> <check register> <loc (register or raw addr)> 
 			mode := Memory[ProgramCounter + 1]
 			checkRegister := Memory[ProgramCounter + 2]
-			var loc int16 = 0
-			var not int16 = 0
+			var loc uint16 = 0
+			var not uint16 = 0
 
 			if mode == 0x01 {
-				loc = int16(Memory[ProgramCounter + 3]) << 8 | int16(Memory[ProgramCounter + 4])
+				loc = uint16(Memory[ProgramCounter + 3]) << 8 | uint16(Memory[ProgramCounter + 4])
 				not = ProgramCounter + 5
 			} else if mode == 0x02 {
-				frm := int16(Memory[ProgramCounter + 3])
+				frm := uint16(Memory[ProgramCounter + 3])
 				loc = getRegister(frm)
 				not = ProgramCounter + 4
 			}
 
-			if getRegister(int16(checkRegister)) != 0 {
+			if getRegister(uint16(checkRegister)) != 0 {
 				setRegister(0x001a, loc)
 			} else {
 				setRegister(0x001a, not)	
 			}
-		case 0x09:
+			stall(8)
+		case 0x06:
 			// NOP
+			setRegister(0x001a, ProgramCounter + 1)
+			stall(1)
+		case 0x07:
+			// CMP
+			// Syntax: CMP <to> <r1> <r2>
+			to := Memory[ProgramCounter + 1]
+			first := Memory[ProgramCounter + 2]
+			second := Memory[ProgramCounter + 3]
 
+			if getRegister(uint16(first)) == getRegister(uint16(second)) {
+				setRegister(uint16(to), uint16(1))
+			} else {	
+				setRegister(uint16(to), uint16(0))
+			}
+			setRegister(0x001a, ProgramCounter + 4)
+			stall(4)
+		case 0x08:
+			// JZ
+			// jz <mode (01 or 02)> <check register> <loc (register or raw addr)> 
+			mode := Memory[ProgramCounter + 1]
+			checkRegister := Memory[ProgramCounter + 2]
+			var loc uint16 = 0
+			var not uint16 = 0
+
+			if mode == 0x01 {
+				loc = uint16(Memory[ProgramCounter + 3]) << 8 | uint16(Memory[ProgramCounter + 4])
+				not = ProgramCounter + 5
+			} else if mode == 0x02 {
+				frm := uint16(Memory[ProgramCounter + 3])
+				loc = getRegister(frm)
+				not = ProgramCounter + 4
+			}
+
+			if getRegister(uint16(checkRegister)) == 0 {
+				setRegister(0x001a, loc)
+			} else {
+				setRegister(0x001a, not)	
+			}
+			stall(8)
+		case 0x09:
+			// INC
+			// inc <register>
+			register := uint16(Memory[ProgramCounter + 1])
+			setRegister(register, getRegister(register) + 1)
+			setRegister(0x001a, ProgramCounter + 2)	
+			stall(1)
+		case 0x0a:
+			// DEC
+			// dec <register>
+			register := uint16(Memory[ProgramCounter + 1])
+			setRegister(register, getRegister(register) - 1)
+			setRegister(0x001a, ProgramCounter + 2)
+			stall(1)
+		case 0x0b:
+			// PUSH
+			// push <register>
+			register := Memory[ProgramCounter + 1]
+			value := getRegister(uint16(register))
+			sp := getRegister(0x0019)
+			sp += 2
+			Memory[sp] = byte(value & 0xFF)
+			Memory[sp + 1] = byte (value >> 8)
+			setRegister(0x0019, uint16(sp))
+			setRegister(0x001a, ProgramCounter + 2)	
+			stall(2)
+		case 0x0c:
+			// POP
+			// pop <register>	
+			register := Memory[ProgramCounter + 1]
+			sp := getRegister(0x0019)
+			value := uint16(Memory[sp]) | uint16(Memory[sp + 1]) << 8
+			setRegister(uint16(register), uint16(value))
+			sp -= 2
+			setRegister(0x0019, uint16(sp))
+			setRegister(0x001a, ProgramCounter + 2)	
+			stall(2)
 		default:
 			fmt.Printf("FATAL: Illegal instruction 0x%02x at instruction 0x%02x\n", op, ProgramCounter)
 			playSound("crash")
@@ -254,14 +329,15 @@ func main() {
 
 	data, err := ioutil.ReadFile(filename)
 	if err != nil {
-		fmt.Println("FATAL: Failed to read disk image.", err)
+		fmt.Println("FATAL: Failed to read disk image '" + filename + "'")
 		playSound("crash")
 		for {
 			time.Sleep(time.Second)
 		}
 	}
-	copy(Memory[:], data)
-	execute()	
+	copy(Memory[:], data)	
+	setRegister(0x0019, uint16(len(data)))
+	execute()
 	for {
 		time.Sleep(time.Second)
 	}

@@ -32,19 +32,26 @@ local registers = {
 local errors = {
     [1] = "Invalid register",
     [2] = "Invalid instruction",
-    [3] = "String not closed by quotes",
+    [3] = "String not wrapped by quotes",
     [4] = "String not terminated by null char",
     [5] = "Comment is not closed",
     [6] = "Function is not closed",
     [7] = "Invalid preprocessor argument",
     [8] = "Invalid number",
     [9] = "[ expected",
-    [10] = "Output machine code too big"
+    [10] = "Output machine code too big",
+    [11] = "String too long for register (max 2 bytes)",
+    [12] = "Putting more than one character to an immediate may have undesirable results",
+    [13] = "Unknown section label"
 }
 
-local outbuffer = ""
+local LabelLocations = {}
 
-local function throwNew(typeo, err, args)
+local CurrentSection = "text"
+local DataBuffer = ""
+local CodeBuffer = ""
+
+local function throw(typeo, err, args)
 	local etext = errors[err]
 	if typeo == "warning" then
         print("\27[33mWarning " .. (tostring(err) or "") .. ": " .. (etext or "") .. " " .. (args or "") .. "\27[0m")
@@ -62,12 +69,16 @@ local function getRegisterFromName(rname, silent)
         end
     end
     if silent ~= true then
-        throwNew("error", 1, "'" .. rname .. "'")
+        throw("error", 1, "'" .. rname .. "'")
     end
 end
 
 local function writeToBufRaw(text)
-    outbuffer = outbuffer .. text
+    if CurrentSection == "text" then
+        CodeBuffer = CodeBuffer .. text
+    elseif CurrentSection == "data" then
+        DataBuffer = DataBuffer .. text
+    end
 end
 
 local function writeToBuf(text)
@@ -82,7 +93,11 @@ local function writeToBuf(text)
             return
         end
     end
-    outbuffer = outbuffer .. string.char(text)
+    if CurrentSection == "text" then
+        CodeBuffer = CodeBuffer .. string.char(text)
+    else
+        DataBuffer = DataBuffer .. string.char(text)
+    end
 end
 
 local function ToTable(text)
@@ -102,41 +117,14 @@ JNZ = 0x04
 CALL = 0x05
 ]]
 
-local instructions = {
-    NULL = 0x00;
-    MOV = 0x01;
-    JMP = 0x02;
-    JNZ = 0x03;
-    INT = 0x04;
-    ADD = 0x05;
-    SUB = 0x06;
-    MUL = 0x07;
-    DIV = 0x08;
-    PUSH = 0x09;
-    AND = 0x0b;
-    OR = 0x0c;
-    NOT = 0x0e;
-    XOR = 0x0f;
-    DB = 0x10;
-    NOP = 0x11;
-    DSTART = 0x12;
-    DSEP = 0x13;
-    DEND = 0x14;
-    CMP = 0x15;
-    FSTART = 0x16;
-    FSEP = 0x17;
-    FEND = 0x18;
-    JZ = 0x19;
-    DW = 0x1a;
-    MBYTE = 0x1c; 
-    STN = 0x1d;
-    STACK = 0x1e;
-    LDA = 0x1f;
-    IGT = 0x7f;
-    ILT = 0x80;
-    IET = 0x81;
-    IGET = 0x82;
-    ILET = 0x83;
+local instructions = { 
+    MOV = 0x01,
+    HLT = 0x02,
+    JMP = 0x03,
+    INT = 0x04,
+    JNZ = 0x05,
+    NOP = 0x06,
+
 }
 
 local padto = 0
@@ -146,7 +134,7 @@ local function getInstructionFromName(ins)
     if instructions[ins] then
         return instructions[ins]
     else
-        throwNew("error", 2, "'" .. ins .. "'")
+        throw("error", 2, "'" .. ins .. "'")
     end
 end
 
@@ -174,7 +162,7 @@ local function parse(token, start, tokens)
                     if #tokens == 1 then
                         onetoken = true
                     else
-                        throwNew("error", 3, "'" .. tokens[#tokens] .. "'")
+                        throw("error", 3, "'" .. tokens[#tokens] .. "'")
                     end
                 end
                 tokens[start] = string.gsub(tokens[start], '"', "")
@@ -217,6 +205,13 @@ local function removeComma(str)
     return string.gsub(str, ",", "")
 end
 
+local function UInt16(n)
+    n = n & 0xFFFF
+    local hi = (n >> 8) & 0xFF
+    local lo = n & 0xFF
+    return string.char(hi), string.char(lo)
+end
+
 compile = function(text, args)
     if not text then return end
     local after = 0
@@ -234,114 +229,72 @@ compile = function(text, args)
         local to = tokens[2]
         to = removeComma(to)
         local from = tokens[3]
+        local mode
         from = parse(from)
-        writeToBuf(getInstructionFromName(tokens[1]))
-        writeToBuf(getRegisterFromName(to))
-        writeToBuf(from)
-        after = 4
-    elseif string.upper(tokens[1]) == "LDA" then
-        local to = tokens[2]  
-        writeToBuf(getInstructionFromName(tokens[1]))
-        writeToBuf(getRegisterFromName(to))
-        after = 3
-    elseif string.upper(tokens[1]) == "STACK" then
-        writeToBuf(getInstructionFromName(tokens[1]))
-        writeToBufRaw(tokens[2])
-        after = 3
-    elseif string.upper(tokens[1]) == ";" then
-        local _end = 0
-        for i = 2, #tokens do
-            if tokens[i] == ";" then
-                _end = i
-                break
+
+        local Mode = nil
+ 
+        local FH
+        local FL
+
+        if from[2] == "REGISTER" then
+            Mode = 2 
+        elseif from[2] == "NUMBER" then
+            Mode = 1
+            FH, FL = UInt16(tonumber(from[1]))
+            print(string.byte(FH))
+            print(string.byte(FL))
+        elseif from[2] == "SYMBOL" then
+            Mode = 1
+            if not string.sub(from[1], 1, 1) == "\"" or not string.sub(from[1], #from[1], #from[1]) == "\"" then
+                throw("error", 3) 
+            end
+            from[1] = string.gsub(from[1], "\"", "")
+            if string.len(from[1]) > 2 then
+                throw("error", 11)
+            end
+ 
+            if string.len(from[1]) == 2 then
+                throw("warning", 12)
+                local Num = "0x"
+                Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 1, 1)))
+                Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 2, 2)))
+                Num = tonumber(Num)
+                FH, FL = UInt16(Num) 
+            else
+                local Num = "0x00"
+                Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 1, 1))) 
+                Num = tonumber(Num)
+                FH, FL = UInt16(Num)
             end
         end
-
-        if _end == 0 then
-            throwNew("error", 5, "")
-        end
-
-        after = _end + 1
-    elseif string.upper(tokens[1]) == ";-" then
-        if tokens[2] == "include" then
-            local filename = tokens[3]
-            local file = io.open(filename, 'r')
-            if not file then
-                error("File not found '" .. filename .. "'")
-            end
-            local contents = file:read("a")
-            file:close()
-            compile(contents, { filename = filename })
-            after = 4
-        elseif tokens[2] == "size" then
-            padto = (tonumber(tokens[3]) or throwNew("error", 8))
-            after = 4
+ 
+        writeToBuf(getInstructionFromName(tokens[1]))
+        writeToBufRaw(string.char(Mode)) 
+        writeToBuf(getRegisterFromName(to))
+        if FH and FL then
+            writeToBufRaw(FH)
+            writeToBufRaw(FL)
         else
-            throwNew("error", 7, tokens[2])
+            writeToBuf(from)
         end
-    elseif string.upper(tokens[1]) == "JMP" then
+        after = 4 
+    elseif string.upper(tokens[1]) == "HLT" then
         writeToBuf(getInstructionFromName(tokens[1]))
         after = 2
-    elseif string.upper(tokens[1]) == "JNZ" then
-        local register = getRegisterFromName(tokens[2])
-        writeToBuf(getInstructionFromName(tokens[1]))
-        writeToBuf(register)
-        after = 3
-    elseif string.upper(tokens[1]) == "JZ" then
+    elseif string.upper(tokens[1]) == "JMP" then
         local register = getRegisterFromName(tokens[2])
         writeToBuf(getInstructionFromName(tokens[1]))
         writeToBuf(register)
         after = 3
     elseif string.upper(tokens[1]) == "INT" then
+        local number = tokens[2]
+        number = tonumber(number)
+        local H, L = UInt16(number)
         writeToBuf(getInstructionFromName(tokens[1]))
-        after = 2
-    elseif string.upper(tokens[1]) == "ADD" then
-
-        local to = tokens[2]
-        local first = tokens[3]
-        to = removeComma(to)
-        first = removeComma(first)
-        
-        to = getRegisterFromName(to)
-        first = getRegisterFromName(first)
-        local second = getRegisterFromName(tokens[4])
-
-        writeToBuf(instructions.ADD)
-        writeToBuf(to)
-        writeToBuf(first)
-        writeToBuf(second)
-
-        after = 5
-    elseif string.upper(tokens[1]) == "SUB" then
-        local to = tokens[2]
-        to = removeComma(to)
-        local first = parse(tokens[3])
-        local second = parse(tokens[4])
-        writeToBuf(getInstructionFromName(tokens[1]))
-        writeToBuf(getRegisterFromName(to))
-        writeToBuf(first)
-        writeToBuf(second)
-        after = 5
-    elseif string.upper(tokens[1]) == "MUL" then
-        local to = tokens[2]
-        to = removeComma(to)
-        local first = parse(tokens[3])
-        local second = parse(tokens[4])
-        writeToBuf(getInstructionFromName(tokens[1]))
-        writeToBuf(getRegisterFromName(to))
-        writeToBuf(first)
-        writeToBuf(second)
-        after = 5
-    elseif string.upper(tokens[1]) == "DIV" then
-        local to = tokens[2]
-        to = removeComma(to)
-        local first = parse(tokens[3])
-        local second = parse(tokens[4])
-        writeToBuf(getInstructionFromName(tokens[1]))
-        writeToBuf(getRegisterFromName(to))
-        writeToBuf(first)
-        writeToBuf(second)
-        after = 5
+        writeToBufRaw(H)
+        writeToBufRaw(L)
+        after = 3
     elseif string.upper(tokens[1]) == "DB" then
         local ending = 0
         local tokensToParse = {}
@@ -355,20 +308,17 @@ compile = function(text, args)
         end
         for i = 2, ending do
             tokens[i] = string.gsub(tokens[i], [[\n]], "\n")
-            tokens[i] = string.gsub(tokens[i], [[\27]], "\27")
+            tokens[i] = string.gsub(tokens[i], [[\r]], "\r")
+            tokens[i] = string.gsub(tokens[i], [[\27]], "\27") 
         end
         if ending == 0 then
-            throwNew("error", 4, "'" .. tokens[#tokens] .. "'")
+            throw("error", 4, "'" .. tokens[#tokens] .. "'")
         end
         for i = 2, ending do
             table.insert(tokensToParse, tokens[i])
         end
         local parsed = parse(nil, 1, tokensToParse)
-        return parsed
-    elseif string.upper(tokens[1]) == "DW" then
-        if tonumber(tokens[2]) then
-            return string.char(instructions.DW) .. tokens[2]
-        end
+        return parsed 
     elseif string.upper(tokens[1]) == "NOP" then
         writeToBuf(instructions.NOP)
         after = 2
@@ -379,41 +329,7 @@ compile = function(text, args)
         writeToBuf(instructions.CMP)
         writeToBuf(getRegisterFromName(first))
         writeToBuf(getRegisterFromName(second))
-        after = 4
-    elseif string.upper(tokens[1]) == "STN" then
-        writeToBuf(instructions.STN)
-        writeToBuf(getRegisterFromName(tokens[2]))
-        after = 3
-    elseif string.upper(tokens[1]) == "MBYTE" then
-        -- Syntax: mbyte 3000 [ hello world! ]
-        writeToBuf(instructions.MBYTE) 
-        tokens[2] = removeComma(tokens[2])
-        writeToBuf(getRegisterFromName(tokens[2]))
-        local _end = 0
-        if tokens[3] ~= "[" then
-            throwNew("error", 9)
-        end
-        local str = ""
-
-        local vtokens = {}
-        for i = 4, #tokens do
-            if tokens[i] == "]" then
-                _end = i
-                break
-            else
-                tokens[i] = string.gsub(tokens[i], "\\0", "\0")
-                tokens[i] = string.gsub(tokens[i], "\\n", "\n")
-                table.insert(vtokens, tokens[i])
-            end
-        end
-        str = table.concat(vtokens, ' ')
-
-        if _end == 0 then
-            throwNew("error", 10)
-        end
-
-        writeToBufRaw(str)
-        after = _end + 1
+        after = 4 
     elseif string.upper(tokens[1]) == "IGT" or string.upper(tokens[1]) == "ILT" or string.upper(tokens[1]) == "IET" or string.upper(tokens[1]) == "IGET" or string.upper(tokens[1]) == "ILET" then
         writeToBuf(getInstructionFromName(tokens[1]))
         local one = tokens[2]
@@ -423,6 +339,44 @@ compile = function(text, args)
         writeToBuf(getRegisterFromName(one))
         writeToBuf(getRegisterFromName(two))
         after = 4
+    elseif string.upper(tokens[1]) == ";" then
+        local _end = 0
+        for i = 2, #tokens do
+            if tokens[i] == ";" then
+                _end = i
+                break
+            end
+        end
+
+        if _end == 0 then
+            throw("error", 5, "")
+        end
+
+        after = _end + 1
+    elseif string.upper(tokens[1]) == "%" then
+        if tokens[2] == "include" then
+            local filename = tokens[3]
+            local file = io.open(filename, 'r')
+            if not file then
+                error("File not found '" .. filename .. "'")
+            end
+            local contents = file:read("a")
+            file:close()
+            compile(contents, { filename = filename })
+            after = 4
+        elseif tokens[2] == "size" then
+            padto = (tonumber(tokens[3]) or throw("error", 8))
+            after = 4
+        elseif tokens[2] == "section" then
+            local section = tokens[3]
+            if section ~= "data" and section ~= "text" then
+                throw("error", 12, section) 
+            end
+            CurrentSection = section
+            after = 4
+        else
+            throw("error", 7, tokens[2])
+        end
     elseif string.find(tokens[1], ":") and string.find(tokens[1], ":") == #tokens[1] then
         tokens[1] = string.gsub(tokens[1], ":", "")
         if string.find(tokens[1], ":") then
@@ -469,7 +423,7 @@ compile = function(text, args)
         end
         
         if _end == 0 then
-            throwNew("error", 6, "")
+            throw("error", 6, "")
         end
 
         local ntoken = ToTable(tokens[1])
@@ -516,16 +470,23 @@ file:close()
 compile(content, { filename = infile })
 
 if padto ~= 0 then
-    if string.len(outbuffer) > padto then
-        throwNew("error", 10) 
-    elseif string.len(outbuffer) < padto then
-        for i = string.len(outbuffer), padto do
-            outbuffer = outbuffer .. "\0"
+    if string.len(CodeBuffer) > padto then
+        throw("error", 10) 
+    elseif string.len(CodeBuffer) < padto then
+        for i = string.len(CodeBuffer), padto do
+            CodeBuffer = CodeBuffer .. "\0"
         end
     end
 end
 
+local buffer = DataBuffer .. CodeBuffer
+print("Data:", #DataBuffer)
+local entry = #DataBuffer + 2
+local H, L = UInt16(entry)
+buffer = H .. L .. DataBuffer .. CodeBuffer
+
 local file = io.open(outfile, "w")
 if not file then error("Could not create file") end
-file:write(outbuffer)
+file:write(buffer)
 file:close()
+
