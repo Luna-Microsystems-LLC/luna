@@ -1,0 +1,31 @@
+Luna L-Series License
+======================
+
+This work is licensed under the CERN Open Hardware License Version 2 -
+Strongly Reciprocal (CERN-OHL-S v2). See the full text of the CERN-OHL-S v2 at:
+https://ohwr.org/project/cernohl/wikis/Documents/CERN-OHL-version-2
+
+Additional terms (Luna L-Series License)
+========================================
+
+1. Non-commercial use
+    This work, and any modifications or derivative works, may not be sold, licensed,
+    or otherwise used for commercial purposes without the express written permission
+    of Luna Microsystems LLC.
+
+2. Attribution
+    Any redistribution or modification must clearly state that it is based on the
+    Luna CPU architecture(s) and toolchain developed by Luna Microsystems LLC and
+    must include visible attribution to Luna Microsystems LLC.
+
+3. Patent waiver
+    No person or entity may file, claim, or enforce any patent or patent application
+    covering this work or any derivative works. By using this work, you agree to
+    permanently waive all patent rights related to it.
+
+Disclaimer
+==========
+
+This work is provided "as is," without warranties or conditions of any kind, either
+express or implied. Luna Microsystems LLC shall not be liable for any damages arising from the
+use of this work.

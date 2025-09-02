@@ -1,28 +1,18 @@
 /*
-Luna L2 CPU implementation
-Find more details at luna.alexflax.xyz
-
-Luna is an open-source CPU implementation.
-
-Get LASM (Luna assembler) and LCC (Luna C compiler) as well at:
-https://github.com/alexfdev0/luna
-
-Free to use, modify, and redistribute under Apache 2.0 license (the "License").
-You may not use this file except in compliance with the License.
-You may obtain a copy of the license at https://www.apache.org/licenses/LICENSE-2.0
-Unless required by applicable law or agreed to in writing, software distributed
-under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-CONDITIONS OF ANY KIND, either express or implied. See the License for the specific
-language governing permissions and limitations under the License.
-
-Specs:
-16 bit CPU
-65 KB memory
-Sound capabilities
-Big endian
-RISC-like architecture
-
-Copyright (c) 2025 Luna Microsystems LLC, under the Apache 2.0 license.
+ * Luna L-Series License
+ * 
+ * This file is part of the Luna CPU architecture and toolchain,
+ * developed by Luna Microsystems LLC.
+ *
+ * Licensed under the CERN Open Hardware Licence Version 2 – Strongly Reciprocal
+ * (CERN-OHL-S v2) with Additional Terms 
+ * (Non-Commercial Use, Attribution, Patent Waiver).
+ * 
+ * You may use and modify this work with attribution for non-commercial purposes.
+ * Commercial use requires written permission from Luna Microsystems LLC.
+ *
+ * Full license text: see the LICENSE file in the repository root.
+ *
 */
 
 package main
@@ -330,6 +320,14 @@ func main() {
 	data, err := ioutil.ReadFile(filename)
 	if err != nil {
 		fmt.Println("FATAL: Failed to read disk image '" + filename + "'")
+		playSound("crash")
+		for {
+			time.Sleep(time.Second)
+		}
+	}
+
+	if len(data) > 65535 {
+		fmt.Println("FATAL: Disk image too large (max 64KiB)")
 		playSound("crash")
 		for {
 			time.Sleep(time.Second)
