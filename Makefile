@@ -1,3 +1,5 @@
+# Luna L-Series License: CERN-OHL-S v2 with Additional Terms (see LICENSE file)
+
 LUAC=env luac
 LUA=env lua
 SRC=./
