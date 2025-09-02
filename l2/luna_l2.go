@@ -1,20 +1,3 @@
-/*
- * Luna L-Series License
- * 
- * This file is part of the Luna CPU architecture and toolchain,
- * developed by Luna Microsystems LLC.
- *
- * Licensed under the CERN Open Hardware Licence Version 2 – Strongly Reciprocal
- * (CERN-OHL-S v2) with Additional Terms 
- * (Non-Commercial Use, Attribution, Patent Waiver).
- * 
- * You may use and modify this work with attribution for non-commercial purposes.
- * Commercial use requires written permission from Luna Microsystems LLC.
- *
- * Full license text: see the LICENSE file in the repository root.
- *
-*/
-
 package main
 
 import (
