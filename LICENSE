@@ -1,12 +1,12 @@
-Luna L-Series License
-======================
+Luna Microsystems General Purpose License
+=========================================
 
 This work is licensed under the CERN Open Hardware License Version 2 -
 Strongly Reciprocal (CERN-OHL-S v2). See the full text of the CERN-OHL-S v2 at:
 https://gitlab.com/ohwr/project/cernohl/-/wikis/uploads/819d71bea3458f71fba6cf4fb0f2de6b/cern_ohl_s_v2.txt
 
-Additional terms (Luna L-Series License)
-========================================
+Additional terms (Luna Microsystems General Purpose License)
+============================================================
 
 1. Non-commercial use
     This work, and any modifications or derivative works, may not be sold, licensed,
@@ -27,8 +27,8 @@ Disclaimer
 ==========
 
 This work is provided "as is," without warranties or conditions of any kind, either
-express or implied. Luna Microsystems LLC shall not be liable for any damages arising from the
-use of this work.
+express or implied. Luna Microsystems LLC shall not be liable for any damages 
+arising from the use of this work.
 
-All files in this repository are licensed under the Luna L-Series License unless
-where otherwise noted.
+All files in this repository are licensed under the Luna Microsystems General 
+Purpose License except where otherwise noted.
