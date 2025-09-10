@@ -9,11 +9,11 @@ all: luna-l2 lasm lcc
 luna-l1:
 	sudo mkdir -p /usr/local/bin/lvm
 	sudo $(LUAC) -o /usr/local/bin/lvm/luna-l1 $(SRC)/l1/luna_l1.lua
-	sudo printf '#!/bin/sh\n $(LUA) /usr/local/bin/lvm/luna-l1 "$$@"' >> /usr/local/bin/luna-l1
+	sudo printf '#!/bin/sh\n $(LUA) /usr/local/bin/lvm/luna-l1 "$$@"' > /usr/local/bin/luna-l1
 	sudo $(LUAC) -o /usr/local/bin/lvm/lcc-l1 $(SRC)/l1/lcc.lua
-	sudo printf '#!/bin/sh\n $(LUA) /usr/local/bin/lvm/lcc-l1 "$$@"' >> /usr/local/bin/lcc-l1
+	sudo printf '#!/bin/sh\n $(LUA) /usr/local/bin/lvm/lcc-l1 "$$@"' > /usr/local/bin/lcc-l1
 	sudo $(LUAC) -o /usr/local/bin/lvm/lasm-l1 $(SRC)/l1/lasm.lua
-	sudo printf '#!/bin/sh\n $(LUA) /usr/local/bin/lvm/lasm-l1 "$$@"' >> /usr/local/bin/lasm-l1	
+	sudo printf '#!/bin/sh\n $(LUA) /usr/local/bin/lvm/lasm-l1 "$$@"' > /usr/local/bin/lasm-l1	
 	sudo chmod +x /usr/local/bin/luna-l1
 	sudo chmod +x /usr/local/bin/lcc-l1
 	sudo chmod +x /usr/local/bin/lasm-l1

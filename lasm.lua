@@ -50,6 +50,7 @@ local LabelLocations = {}
 local CurrentSection = "text"
 local DataBuffer = ""
 local CodeBuffer = ""
+local ExtendedDataBuffer = ""
 
 local function throw(typeo, err, args)
 	local etext = errors[err]
@@ -78,6 +79,8 @@ local function writeToBufRaw(text)
         CodeBuffer = CodeBuffer .. text
     elseif CurrentSection == "data" then
         DataBuffer = DataBuffer .. text
+    elseif CurrentSection == "edata" then
+        ExtendedDataBuffer = ExtendedDataBuffer .. text
     end
 end
 
@@ -124,7 +127,7 @@ local instructions = {
     INT = 0x04,
     JNZ = 0x05,
     NOP = 0x06,
-
+    CMP = 0x07 
 }
 
 local padto = 0
@@ -287,6 +290,56 @@ compile = function(text, args)
         writeToBuf(getInstructionFromName(tokens[1]))
         writeToBuf(register)
         after = 3
+    elseif string.upper(tokens[1]) == "JNZ" then
+        local check = tokens[2]
+        check = removeComma(check)
+        local from = tokens[3]
+        from = parse(from)
+
+        local Mode = nil
+        local FH
+        local FL
+        if from[2] == "REGISTER" then
+            Mode = 2 
+        elseif from[2] == "NUMBER" then
+            Mode = 1
+            FH, FL = UInt16(tonumber(from[1]))
+            print(string.byte(FH))
+            print(string.byte(FL))
+        elseif from[2] == "SYMBOL" then
+            Mode = 1
+            if not string.sub(from[1], 1, 1) == "\"" or not string.sub(from[1], #from[1], #from[1]) == "\"" then
+                throw("error", 3) 
+            end
+            from[1] = string.gsub(from[1], "\"", "")
+            if string.len(from[1]) > 2 then
+                throw("error", 11)
+            end
+            if string.len(from[1]) == 2 then
+                throw("warning", 12)
+                local Num = "0x"
+                Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 1, 1)))
+                Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 2, 2)))
+                Num = tonumber(Num)
+                FH, FL = UInt16(Num) 
+            else
+                local Num = "0x00"
+                Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 1, 1))) 
+                Num = tonumber(Num)
+                FH, FL = UInt16(Num)
+            end
+        end
+
+        writeToBuf(getInstructionFromName(tokens[1]))
+        writeToBufRaw(string.char(Mode))
+        writeToBuf(getRegisterFromName(check))
+        if FH and FL then
+            writeToBufRaw(FH)
+            writeToBufRaw(FL)
+        else
+            writeToBuf(getRegisterFromName(from))
+        end
+        after = 4
     elseif string.upper(tokens[1]) == "INT" then
         local number = tokens[2]
         number = tonumber(number)
@@ -323,22 +376,16 @@ compile = function(text, args)
         writeToBuf(instructions.NOP)
         after = 2
     elseif string.upper(tokens[1]) == "CMP" then
-        local first = tokens[2]
-        local second = tokens[3]
+        local register = tokens[2]
+        local first = tokens[3]
+        local second = tokens[4]
+        register = removeComma(register)
         first = removeComma(first)
-        writeToBuf(instructions.CMP)
+        writeToBuf(getInstructionFromName(tokens[1]))
+        writeToBuf(getRegisterFromName(register))
         writeToBuf(getRegisterFromName(first))
         writeToBuf(getRegisterFromName(second))
-        after = 4 
-    elseif string.upper(tokens[1]) == "IGT" or string.upper(tokens[1]) == "ILT" or string.upper(tokens[1]) == "IET" or string.upper(tokens[1]) == "IGET" or string.upper(tokens[1]) == "ILET" then
-        writeToBuf(getInstructionFromName(tokens[1]))
-        local one = tokens[2]
-        local two = tokens[3]
-        one = removeComma(one)
-
-        writeToBuf(getRegisterFromName(one))
-        writeToBuf(getRegisterFromName(two))
-        after = 4
+        after = 5
     elseif string.upper(tokens[1]) == ";" then
         local _end = 0
         for i = 2, #tokens do
@@ -358,19 +405,31 @@ compile = function(text, args)
             local filename = tokens[3]
             local file = io.open(filename, 'r')
             if not file then
-                error("File not found '" .. filename .. "'")
+                print("\27[31mFile not found '" .. filename .. "'\27[0m")
+                os.exit(1)
             end
             local contents = file:read("a")
             file:close()
             compile(contents, { filename = filename })
+            after = 4
+        elseif tokens[2] == "embed" then
+            local filename = tokens[3]
+            local file = io.open(filename, 'r')
+            if not file then
+                print("\27[31mFile not found '" .. filename .. "'\27[0m")
+                os.exit(1)
+            end
+            local contents = file:read("a")
+            file:close()
+            writeToBufRaw(contents)
             after = 4
         elseif tokens[2] == "size" then
             padto = (tonumber(tokens[3]) or throw("error", 8))
             after = 4
         elseif tokens[2] == "section" then
             local section = tokens[3]
-            if section ~= "data" and section ~= "text" then
-                throw("error", 12, section) 
+            if section ~= "data" and section ~= "text" and section ~= "edata" then
+                throw("error", 13, section) 
             end
             CurrentSection = section
             after = 4
@@ -463,6 +522,11 @@ end
 local infile = arg[1]
 local outfile = arg[2]
 
+if not infile then
+    print("\27[31mPlease provide an input assembly file (.asm/.s) and an output filename (.bin)\27[0m")
+    os.exit(1)
+end
+
 local file = io.open(infile, "r")
 if not file then error("File not found") end
 local content = file:read("*a")
@@ -479,11 +543,9 @@ if padto ~= 0 then
     end
 end
 
-local buffer = DataBuffer .. CodeBuffer
-print("Data:", #DataBuffer)
 local entry = #DataBuffer + 2
 local H, L = UInt16(entry)
-buffer = H .. L .. DataBuffer .. CodeBuffer
+local buffer = H .. L .. DataBuffer .. CodeBuffer .. "\0" .. ExtendedDataBuffer
 
 local file = io.open(outfile, "w")
 if not file then error("Could not create file") end
