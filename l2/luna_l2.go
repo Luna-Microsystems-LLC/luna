@@ -18,6 +18,7 @@ import (
     "gioui.org/op"
     "gioui.org/op/paint"	
 	"gioui.org/f32"
+	"luna_l2/font"
 )
 
 //go:embed sounds/crash.mp3
@@ -28,11 +29,6 @@ type Register struct {
 	Name string
 	Value uint16
 }
-
-const (
-	screenWidth = 640
-	screenHeight = 480
-)
 
 var Registers = []Register{
 	{0x0000, "R0", 0},
@@ -66,6 +62,51 @@ var Registers = []Register{
 
 var Memory [65535]byte
 var MemoryVideo [64000]byte
+
+var cursorX, cursorY int
+
+func PushChar(x, y int, ch rune, fg, bg byte) {
+
+	glyph := font.Font[0x00]
+	if ch < 0 || int(ch) >= len(font.Font) {
+		glyph = font.Font[0x20]
+	} else {
+		glyph = font.Font[ch]
+	}
+
+
+	for row := 0; row < 8; row++ {
+		line := glyph[row]
+		for col := 0; col < 8; col++ {
+			mask := byte(1 << (7 - col))
+			var color byte
+			if line&mask != 0 {
+				color = fg
+			} else {
+				color = bg
+			}
+			px := (y+row)*320 + (x+col)
+			if px >= 0 && px < len(MemoryVideo) {
+				MemoryVideo[px] = color
+			}
+		}
+	}
+}
+
+func PrintChar(ch rune, fg, bg byte) {
+	x := cursorX * 8
+	y := cursorY * 8
+	PushChar(x, y, ch, fg, bg)
+
+	cursorX++
+	if cursorX >= 320/8 {
+		cursorX = 0
+		cursorY++
+	}
+	if cursorY >= 200/8 {
+		cursorY = 0
+	}
+}
 
 func setRegister(address uint16, value uint16) {
 	for i := range Registers {
@@ -110,7 +151,7 @@ func intHandler(code uint16) {
 		// start address in R1
 		char := getRegister(0x0001)
 
-		fmt.Printf(string(rune(char)))
+		PrintChar(rune(char), byte(255), byte(000))	
 	} else if code == 0x02 {
 		timeToSleep := getRegister(0x0001)
 
