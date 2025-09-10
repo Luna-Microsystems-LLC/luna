@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	_ "embed"
 	"fmt"
@@ -12,6 +11,9 @@ import (
 	"runtime"
 	"time"
 
+	"luna_l2/font"
+	"luna_l2/video"
+
 	"gioui.org/app"
 	"gioui.org/f32"
 	"gioui.org/op"
@@ -19,8 +21,6 @@ import (
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
-	"luna_l2/font"
-	"luna_l2/video"
 )
 
 //go:embed sounds/crash.mp3
@@ -103,7 +103,7 @@ func playSound(soundName string) {
 }
 
 func WriteChar(char string, fg uint8, bg uint8) {
-	if Subsystem == 1 {	
+	if Subsystem == 1 {
 		video.PrintChar(rune(char[0]), byte(fg), byte(bg), font.Font)
 	} else if Subsystem == 2 {
 		fmt.Printf(string(char[0]))
@@ -126,18 +126,11 @@ func intHandler(code uint16) {
 		// start address in R1
 		char := getRegister(0x0001)
 
-		WriteChar(string(rune(char)), 255, 0)	
+		WriteChar(string(rune(char)), 255, 0)
 	} else if code == 0x02 {
 		timeToSleep := getRegister(0x0001)
 
 		time.Sleep(time.Second * time.Duration(timeToSleep))
-	} else if code == 0x03 {
-		reader := bufio.NewScanner(os.Stdin)
-		if reader.Scan() {
-			line := reader.Text()
-			line = line
-			// copyMemory()
-		}
 	}
 }
 
@@ -382,7 +375,7 @@ func WindowManage(window *app.Window) error {
 				}
 			}
 
-    		tex = paint.NewImageOp(img)
+			tex = paint.NewImageOp(img)
 
 			scaleX := float32(GTX.Constraints.Max.X) / float32(320)
 			scaleY := float32(GTX.Constraints.Max.Y) / float32(200)
@@ -392,9 +385,9 @@ func WindowManage(window *app.Window) error {
 				scale = scaleY
 			}
 			defer op.Affine(f32.Affine2D{}.Scale(f32.Pt(0, 0), f32.Pt(scale, scale))).Push(GTX.Ops).Pop()
-    		tex.Add(GTX.Ops)
-    		paint.PaintOp{}.Add(GTX.Ops)
-    		E.Frame(GTX.Ops)
+			tex.Add(GTX.Ops)
+			paint.PaintOp{}.Add(GTX.Ops)
+			E.Frame(GTX.Ops)
 			window.Invalidate()
 		}
 	}
@@ -454,10 +447,8 @@ func main() {
 			return
 		}
 		copy(Memory[:], data)
-		setRegister(0x0019, uint16(len(data)))
-		time.Sleep(time.Second * 5)
+		setRegister(0x0019, uint16(len(data)))	
 		execute()
-		return
 	}()
 	if Subsystem == 1 {
 		InitializeWindow()
