@@ -5,20 +5,22 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"image"
+	"image/color"
 	"io"
 	"os"
 	"runtime"
 	"time"
+
+	"gioui.org/app"
+	"gioui.org/f32"
+	"gioui.org/op"
+	"gioui.org/op/paint"
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
-	"image"
-	"image/color"
-	"gioui.org/app"
-    "gioui.org/op"
-    "gioui.org/op/paint"	
-	"gioui.org/f32"
 	"luna_l2/font"
+	"luna_l2/video"
 )
 
 //go:embed sounds/crash.mp3
@@ -26,8 +28,8 @@ var crashSoundData []byte
 
 type Register struct {
 	Address uint16
-	Name string
-	Value uint16
+	Name    string
+	Value   uint16
 }
 
 var Registers = []Register{
@@ -61,52 +63,7 @@ var Registers = []Register{
 }
 
 var Memory [65535]byte
-var MemoryVideo [64000]byte
-
-var cursorX, cursorY int
-
-func PushChar(x, y int, ch rune, fg, bg byte) {
-
-	glyph := font.Font[0x00]
-	if ch < 0 || int(ch) >= len(font.Font) {
-		glyph = font.Font[0x20]
-	} else {
-		glyph = font.Font[ch]
-	}
-
-
-	for row := 0; row < 8; row++ {
-		line := glyph[row]
-		for col := 0; col < 8; col++ {
-			mask := byte(1 << (7 - col))
-			var color byte
-			if line&mask != 0 {
-				color = fg
-			} else {
-				color = bg
-			}
-			px := (y+row)*320 + (x+col)
-			if px >= 0 && px < len(MemoryVideo) {
-				MemoryVideo[px] = color
-			}
-		}
-	}
-}
-
-func PrintChar(ch rune, fg, bg byte) {
-	x := cursorX * 8
-	y := cursorY * 8
-	PushChar(x, y, ch, fg, bg)
-
-	cursorX++
-	if cursorX >= 320/8 {
-		cursorX = 0
-		cursorY++
-	}
-	if cursorY >= 200/8 {
-		cursorY = 0
-	}
-}
+var Subsystem int = 1
 
 func setRegister(address uint16, value uint16) {
 	for i := range Registers {
@@ -134,7 +91,7 @@ func playSound(soundName string) {
 		}
 		defer streamer.Close()
 
-		speaker.Init(format.SampleRate, format.SampleRate.N(time.Second / 10))
+		speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
 
 		done := make(chan bool)
 		speaker.Play(beep.Seq(streamer, beep.Callback(func() {
@@ -145,13 +102,31 @@ func playSound(soundName string) {
 	}
 }
 
+func WriteChar(char string, fg uint8, bg uint8) {
+	if Subsystem == 1 {	
+		video.PrintChar(rune(char[0]), byte(fg), byte(bg), font.Font)
+	} else if Subsystem == 2 {
+		fmt.Printf(string(char[0]))
+	}
+}
+
+func WriteString(str string, fg uint8, bg uint8) {
+	for _, r := range str {
+		WriteChar(string(r), fg, bg)
+	}
+}
+
+func WriteLine(str string, fg uint8, bg uint8) {
+	WriteString(str+"\n", fg, bg)
+}
+
 func intHandler(code uint16) {
 	if code == 0x01 {
 		// BIOS print to screen
 		// start address in R1
 		char := getRegister(0x0001)
 
-		PrintChar(rune(char), byte(255), byte(000))	
+		WriteChar(string(rune(char)), 255, 0)	
 	} else if code == 0x02 {
 		timeToSleep := getRegister(0x0001)
 
@@ -178,7 +153,7 @@ func execute() {
 		op := Memory[ProgramCounter]
 
 		if ProgramCounter == 0x0000 {
-			codesect := uint16(Memory[ProgramCounter]) << 8 | uint16(Memory[ProgramCounter + 1])
+			codesect := uint16(Memory[ProgramCounter])<<8 | uint16(Memory[ProgramCounter+1])
 			setRegister(0x001a, codesect)
 			continue
 		}
@@ -331,47 +306,46 @@ func execute() {
 		case 0x0d:
 			// ADD
 			// add <register> <register> <register>
-			toregister := Memory[ProgramCounter + 1]
-			regone := Memory[ProgramCounter + 2]
-			regtwo := Memory[ProgramCounter + 3]
-			setRegister(uint16(toregister), getRegister(uint16(regone)) + getRegister(uint16(regtwo)))
-			setRegister(0x001a, ProgramCounter + 4)
+			toregister := Memory[ProgramCounter+1]
+			regone := Memory[ProgramCounter+2]
+			regtwo := Memory[ProgramCounter+3]
+			setRegister(uint16(toregister), getRegister(uint16(regone))+getRegister(uint16(regtwo)))
+			setRegister(0x001a, ProgramCounter+4)
 			stall(7)
 		case 0x0e:
 			// SUB
 			// SUB <register> <register> <register>
-			toregister := Memory[ProgramCounter + 1]
-			regone := Memory[ProgramCounter + 2]
-			regtwo := Memory[ProgramCounter + 3]
-			setRegister(uint16(toregister), getRegister(uint16(regone)) - getRegister(uint16(regtwo)))
-			setRegister(0x001a, ProgramCounter + 4)
+			toregister := Memory[ProgramCounter+1]
+			regone := Memory[ProgramCounter+2]
+			regtwo := Memory[ProgramCounter+3]
+			setRegister(uint16(toregister), getRegister(uint16(regone))-getRegister(uint16(regtwo)))
+			setRegister(0x001a, ProgramCounter+4)
 			stall(7)
 		case 0x0f:
 			// MUL
 			// mul <register> <register> <register>
-			toregister := Memory[ProgramCounter + 1]
-			regone := Memory[ProgramCounter + 2]
-			regtwo := Memory[ProgramCounter + 3]
-			setRegister(uint16(toregister), getRegister(uint16(regone)) * getRegister(uint16(regtwo)))
-			setRegister(0x001a, ProgramCounter + 4)
+			toregister := Memory[ProgramCounter+1]
+			regone := Memory[ProgramCounter+2]
+			regtwo := Memory[ProgramCounter+3]
+			setRegister(uint16(toregister), getRegister(uint16(regone))*getRegister(uint16(regtwo)))
+			setRegister(0x001a, ProgramCounter+4)
 			stall(70)
 		case 0x10:
 			// DIV
 			// div <register> <register> <register>
-			toregister := Memory[ProgramCounter + 1]
-			regone := Memory[ProgramCounter + 2]
-			regtwo := Memory[ProgramCounter + 3]
-			setRegister(uint16(toregister), getRegister(uint16(regone)) / getRegister(uint16(regtwo)))
-			setRegister(0x001a, ProgramCounter + 4)
+			toregister := Memory[ProgramCounter+1]
+			regone := Memory[ProgramCounter+2]
+			regtwo := Memory[ProgramCounter+3]
+			setRegister(uint16(toregister), getRegister(uint16(regone))/getRegister(uint16(regtwo)))
+			setRegister(0x001a, ProgramCounter+4)
 			stall(140)
 		default:
-			fmt.Printf("FATAL: Illegal instruction 0x%02x at instruction 0x%02x\n", op, ProgramCounter)
+			WriteString("FATAL: Illegal instruction "+string(op)+" at location "+string(getRegister(0x001a)), 255, 0)
 			playSound("crash")
 			return
 		}
 	}
 }
-
 
 func WindowManage(window *app.Window) error {
 	var ops op.Ops
@@ -386,11 +360,11 @@ func WindowManage(window *app.Window) error {
 	i := 0
 	for y := 0; y < 200; y++ {
 		for x := 0; x < 320; x++ {
-			img.Set(x, y, Palette[uint8(MemoryVideo[i])])
+			img.Set(x, y, Palette[uint8(video.MemoryVideo[i])])
 			i++
 		}
 	}
-	
+
 	tex := paint.NewImageOp(img)
 
 	for {
@@ -400,6 +374,16 @@ func WindowManage(window *app.Window) error {
 		case app.FrameEvent:
 			GTX := app.NewContext(&ops, E)
 
+			i := 0
+			for y := 0; y < 200; y++ {
+				for x := 0; x < 320; x++ {
+					img.Set(x, y, Palette[video.MemoryVideo[i]])
+					i++
+				}
+			}
+
+    		tex = paint.NewImageOp(img)
+
 			scaleX := float32(GTX.Constraints.Max.X) / float32(320)
 			scaleY := float32(GTX.Constraints.Max.Y) / float32(200)
 
@@ -407,12 +391,11 @@ func WindowManage(window *app.Window) error {
 			if scaleY < scaleX {
 				scale = scaleY
 			}
-			trans := op.Affine(f32.Affine2D{}.Scale(f32.Pt(0, 0), f32.Pt(scale, scale)))
-			defer trans.Push(GTX.Ops).Pop()
-
-			tex.Add(GTX.Ops)
-			paint.PaintOp{}.Add(GTX.Ops)
-			E.Frame(GTX.Ops)
+			defer op.Affine(f32.Affine2D{}.Scale(f32.Pt(0, 0), f32.Pt(scale, scale))).Push(GTX.Ops).Pop()
+    		tex.Add(GTX.Ops)
+    		paint.PaintOp{}.Add(GTX.Ops)
+    		E.Frame(GTX.Ops)
+			window.Invalidate()
 		}
 	}
 	return nil
@@ -421,31 +404,38 @@ func WindowManage(window *app.Window) error {
 func InitializeWindow() {
 	go func() {
 		w := new(app.Window)
-		w.Option (
+		w.Option(
 			app.Title("Luna L2"),
 			app.Size(320, 200),
 		)
 		if err := WindowManage(w); err != nil {
-			fmt.Printf("FATAL: Failed to initialize window.")
+			WriteLine("FATAL: Failed to initialize window.", 255, 0)
 			os.Exit(1)
 		}
 	}()
 	app.Main()
 }
 
-func main() {	
+func main() {
 	go func() {
-		fmt.Println("Luna L2")
-		fmt.Println("BIOS: Integrated BIOS")
-		fmt.Println("Host: " + runtime.GOOS)
-		fmt.Println("Host CPU: " + runtime.GOARCH)
-		fmt.Println("Copyright (c) 2025 Luna Microsystems LLC\n")
+		WriteLine("Luna L2", 255, 0)
+		WriteLine("BIOS: Integrated BIOS", 255, 0)
+		WriteLine("Host: "+runtime.GOOS, 255, 0)
+		WriteLine("Host CPU: "+runtime.GOARCH, 255, 0)
+		WriteLine("Copyright (c) 2025 Luna Microsystems LLC\n", 255, 0)
 
 		if len(os.Args) < 2 {
-			fmt.Println("FATAL: Disk image not found.")
+			WriteLine("FATAL: Disk image not found.", 255, 0)
 			playSound("crash")
-			for {
-				time.Sleep(time.Second)
+			return
+		} else if len(os.Args) == 3 {
+			if os.Args[2] == "console" {
+				Subsystem = 2
+			} else if os.Args[2] == "graphical" {
+				Subsystem = 1
+			} else {
+				WriteLine("FATAL: Invalid subsystem (console, graphical)", 255, 0)
+				os.Exit(1)
 			}
 		}
 
@@ -453,26 +443,23 @@ func main() {
 
 		data, err := os.ReadFile(filename)
 		if err != nil {
-			fmt.Println("FATAL: Failed to read disk image '" + filename + "'")
+			WriteLine("FATAL: Failed to read disk image '"+filename+"'", 255, 0)
 			playSound("crash")
-			for {
-				time.Sleep(time.Second)
-			}
+			return
 		}
 
 		if len(data) > 65535 {
-			fmt.Println("FATAL: Disk image too large (max 64KiB)")
+			WriteLine("FATAL: Disk image too large (max 64KiB)", 255, 0)
 			playSound("crash")
-			for {
-				time.Sleep(time.Second)
-			}
+			return
 		}
 		copy(Memory[:], data)
-		setRegister(0x0019, uint16(len(data)))	
+		setRegister(0x0019, uint16(len(data)))
+		time.Sleep(time.Second * 5)
 		execute()
-		for {
-			time.Sleep(time.Second)
-		}
+		return
 	}()
-	InitializeWindow()
+	if Subsystem == 1 {
+		InitializeWindow()
+	}
 }
