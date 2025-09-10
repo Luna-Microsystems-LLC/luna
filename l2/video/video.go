@@ -1,6 +1,7 @@
 package video
 
-var CursorX, CursorY int
+var CursorX int = 0
+var CursorY int = 0
 
 var MemoryVideo [64000]byte
 func PushChar(x, y int, ch rune, fg, bg byte, font [128][8]byte) {
@@ -34,8 +35,8 @@ func PrintChar(ch rune, fg, bg byte, font [128][8]byte) {
 	y := CursorY * 8
 
 	if ch == 0x0a {
-		CursorX = 0
 		CursorY++
+		CursorX = 0	
 	} else if ch == 0x0d {
 		CursorX = 0
 	} else {
@@ -44,8 +45,8 @@ func PrintChar(ch rune, fg, bg byte, font [128][8]byte) {
 
 	CursorX++
 	if CursorX >= 320/8 {
-		CursorX = 0
 		CursorY++
+		CursorX = 0
 	}
 	if CursorY >= 200/8 {
 		CursorY = 0
