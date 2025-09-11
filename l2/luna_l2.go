@@ -9,16 +9,19 @@ import (
 	"os"
 	"runtime"
 	"time"
-	"fmt"
+	"fmt"	
 
 	"luna_l2/font"
 	"luna_l2/video"
+	"luna_l2/keyboard"
 
-	"gioui.org/app"
+	"gioui.org/app"	
 	"gioui.org/f32"
 	"gioui.org/op"
 	"gioui.org/op/paint"
+	"gioui.org/op/clip"
 	"gioui.org/io/key"
+	"gioui.org/io/event"
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
@@ -384,16 +387,52 @@ func WindowManage(window *app.Window) error {
 	for {
 		switch E := window.Event().(type) {
 		case app.DestroyEvent:
-			return E.Err
-		case key.Event:
-			fmt.Println("Key event: " + string(E.Name))
-			setRegister(0x001b, uint16(rune(string(E.Name)[0])))
-			intHandler(0x05)	
+			return E.Err	
 		case app.FrameEvent:
 			Ready = true
 			GTX := app.NewContext(&ops, E)
 
 			paint.Fill(GTX.Ops, color.NRGBA{R: 0, G: 0, B: 0, A: 255})
+		
+			area := clip.Rect{Max: GTX.Constraints.Max}.Push(GTX.Ops)
+			event.Op(GTX.Ops, window)
+			for {
+				event, ok := GTX.Event(key.Filter{Name: ""})
+
+				if !ok {
+					break
+				}
+				switch event := event.(type) {
+				case key.Event:
+					if event.State == key.Press {
+						char := string(event.Name)
+
+						if event.Name == "Space" {
+							char = string(byte(0x20))
+						} else if event.Name == "⏎" {
+							char = string(byte(0x0a))
+						} else if event.Name == "Shift" {
+							if keyboard.Shift == false {
+								keyboard.Shift = true
+							} else {
+								keyboard.Shift = false
+							}
+							continue
+						}
+
+						if keyboard.Shift == false {
+							char = keyboard.Lower(char)	
+						} else {
+							char = keyboard.Upper(char)
+						}
+
+						fmt.Println("Received key " + char)
+    					setRegister(0x001b, uint16(rune(char[0])))
+    					intHandler(0x05)
+					}
+				}
+			}
+			area.Pop()
 
 			i := 0
 			for y := 0; y < 200; y++ {
@@ -415,7 +454,7 @@ func WindowManage(window *app.Window) error {
 			}
 			defer op.Affine(f32.Affine2D{}.Scale(f32.Pt(0, 0), f32.Pt(scale, scale))).Push(GTX.Ops).Pop()
 			tex.Add(GTX.Ops)
-			paint.PaintOp{}.Add(GTX.Ops)
+			paint.PaintOp{}.Add(GTX.Ops)	
 			E.Frame(GTX.Ops)
 			window.Invalidate()
 		}
@@ -439,6 +478,7 @@ func InitializeWindow() {
 }
 
 func main() {
+	fmt.Printf("\033]0;Luna L2 (Host Console)\007")
 	go func() {
 		if Ready == false {
 			for {
