@@ -1,18 +1,21 @@
 package video
 
-import "image/color"
+import (
+	"image/color"
+	"luna_l2/font"
+)
 
 var CursorX int = 0
 var CursorY int = 0
 var MemoryVideo [64000]byte
 var Palette [256]color.NRGBA
 
-func PushChar(x, y int, ch rune, fg, bg byte, font [128][8]byte) {
+func PushChar(x, y int, ch rune, fg byte, bg byte) {
     idx := int(ch)
-    glyph := font[0x00]
+    glyph := font.Font[0x00]
 
-    if idx >= 0 && idx < len(font) {
-        glyph = font[idx]
+    if idx >= 0 && idx < len(font.Font) {
+        glyph = font.Font[idx]
     }
 
     for row := 0; row < 8; row++ {
@@ -33,7 +36,7 @@ func PushChar(x, y int, ch rune, fg, bg byte, font [128][8]byte) {
     }
 }
 
-func PrintChar(ch rune, fg, bg byte, font [128][8]byte) {
+func PrintChar(ch rune, fg byte, bg byte) {
 	if ch == 0x0a {
 		CursorY++
 		CursorX = 0
@@ -46,7 +49,7 @@ func PrintChar(ch rune, fg, bg byte, font [128][8]byte) {
 	x := CursorX * 8
 	y := CursorY * 8	
 
-	PushChar(x, y, ch, fg, bg, font)
+	PushChar(x, y, ch, fg, bg)
 
 	CursorX++
 	if CursorX >= 320/8 {

@@ -1,17 +1,15 @@
 package main
 
-import (
-	"bytes"
-	_ "embed"	
+import (	
 	"image"
-	"image/color"
-	"io"
+	"image/color"	
 	"os"
 	"runtime"
 	"time"
 	"fmt"	
 
-	"luna_l2/font"
+	"luna_l2/bios"	
+	"luna_l2/sound"
 	"luna_l2/video"
 	"luna_l2/keyboard"
 
@@ -21,14 +19,8 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/op/clip"
 	"gioui.org/io/key"
-	"gioui.org/io/event"
-	"github.com/faiface/beep"
-	"github.com/faiface/beep/mp3"
-	"github.com/faiface/beep/speaker"
+	"gioui.org/io/event"	
 )
-
-//go:embed sounds/crash.mp3
-var crashSoundData []byte
 
 type Register struct {
 	Address uint16
@@ -71,7 +63,6 @@ var Registers = []Register{
 
 var Memory [65535]byte
 var Ready bool = false
-var TypeOut bool = false
 
 func setRegister(address uint16, value uint16) {
 	for i := range Registers {
@@ -91,37 +82,10 @@ func getRegister(address uint16) uint16 {
 	return 0x0000
 }
 
-func playSound(soundName string) {
-	if soundName == "crash" {
-		streamer, format, err := mp3.Decode(io.NopCloser(bytes.NewReader(crashSoundData)))
-		if err != nil {
-			return
-		}
-		defer streamer.Close()
-
-		speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
-
-		done := make(chan bool)
-		speaker.Play(beep.Seq(streamer, beep.Callback(func() {
-			done <- true
-		})))
-
-		<-done
-	}
-}
-
-func WriteChar(char string, fg uint8, bg uint8) {
-	video.PrintChar(rune(char[0]), byte(fg), byte(bg), font.Font)
-}
-
-func WriteString(str string, fg uint8, bg uint8) {
-	for _, r := range str {
-		WriteChar(string(r), fg, bg)
-	}
-}
-
-func WriteLine(str string, fg uint8, bg uint8) {
-	WriteString(str + "\n", fg, bg)
+func stall(cycles int) {
+	clockHz := 1158000
+	cycleTime := int(time.Second) / clockHz
+	time.Sleep(time.Duration(cycleTime * cycles))
 }
 
 func intHandler(code uint16) {
@@ -131,7 +95,7 @@ func intHandler(code uint16) {
 		// Foreground in R2
 		// Background in R3
 		char := getRegister(0x0001)
-		WriteChar(string(rune(char)), uint8(getRegister(0x0002)), uint8(getRegister(0x0003)))
+		bios.WriteChar(string(rune(char)), uint8(getRegister(0x0002)), uint8(getRegister(0x0003)))
 	} else if code == 0x02 {
 		// BIOS sleep
 		// seconds in R1
@@ -151,21 +115,15 @@ func intHandler(code uint16) {
 		// Mode 2: type output
 		// In R1
 		if getRegister(0x0001) == uint16(1) {
-			TypeOut = true
+			bios.TypeOut = true
 		} else {
-			TypeOut = false
+			bios.TypeOut = false
 		}
 	} else if code == 0x5 {
-		if TypeOut == true {
-			WriteChar(string(rune(getRegister(0x001b))), uint8(255), uint8(0))
+		if bios.TypeOut == true {
+			bios.WriteChar(string(rune(getRegister(0x001b))), uint8(255), uint8(0))
 		}
 	}
-}
-
-func stall(cycles int) {
-	clockHz := 1158000
-	cycleTime := int(time.Second) / clockHz
-	time.Sleep(time.Duration(cycleTime * cycles))
 }
 
 func execute() {
@@ -360,9 +318,92 @@ func execute() {
 			setRegister(uint16(toregister), getRegister(uint16(regone))/getRegister(uint16(regtwo)))
 			setRegister(0x001a, ProgramCounter+4)
 			stall(140)
+		case 0x11:
+			// IGT
+			// igt <register> <register> <register>
+			toregister := Memory[ProgramCounter+1]
+			regone := Memory[ProgramCounter+2]
+			regtwo := Memory[ProgramCounter+3]
+			if getRegister(uint16(regone)) > getRegister(uint16(regtwo)) {
+				setRegister(uint16(toregister), uint16(1))
+			} else {
+				setRegister(uint16(toregister), uint16(0))
+			}
+			setRegister(0x001a, ProgramCounter + 4)
+		case 0x12:
+			// ILT
+			// ilt <register> <register> <register>
+			toregister := Memory[ProgramCounter+1]
+			regone := Memory[ProgramCounter+2]
+			regtwo := Memory[ProgramCounter+3]
+			if getRegister(uint16(regone)) < getRegister(uint16(regtwo)) {
+				setRegister(uint16(toregister), uint16(1))
+			} else {
+				setRegister(uint16(toregister), uint16(0))
+			}
+			setRegister(0x001a, ProgramCounter + 4)
+		case 0x13:
+			// AND
+			// and <register> <register> <register>
+			toregister := Memory[ProgramCounter+1]
+			regone := Memory[ProgramCounter+2]
+			regtwo := Memory[ProgramCounter+3]
+			if getRegister(uint16(regone)) != 0 && getRegister(uint16(regtwo)) != 0 {
+				setRegister(uint16(toregister), uint16(1))
+			} else {
+				setRegister(uint16(toregister), uint16(0))
+			}
+			setRegister(0x001a, ProgramCounter + 4)
+		case 0x14:
+			// OR
+			// or <register> <register> <register>
+			toregister := Memory[ProgramCounter+1]
+			regone := Memory[ProgramCounter+2]
+			regtwo := Memory[ProgramCounter+3]
+			if getRegister(uint16(regone)) != 0 || getRegister(uint16(regtwo)) != 0 {
+				setRegister(uint16(toregister), uint16(1))
+			} else {
+				setRegister(uint16(toregister), uint16(0))
+			}
+			setRegister(0x001a, ProgramCounter + 4)
+		case 0x15:
+			// NOR
+			// nor <register> <register> <register>
+			toregister := Memory[ProgramCounter+1]
+			regone := Memory[ProgramCounter+2]
+			regtwo := Memory[ProgramCounter+3]
+			if getRegister(uint16(regone)) == 0 && getRegister(uint16(regtwo)) == 0 {
+				setRegister(uint16(toregister), uint16(1))
+			} else {
+				setRegister(uint16(toregister), uint16(0))
+			}
+			setRegister(0x001a, ProgramCounter + 4)
+		case 0x16:
+			// NOT
+			// not <register> <register>
+			toregister := Memory[ProgramCounter+1]
+			regone := Memory[ProgramCounter+2]
+			if getRegister(uint16(regone)) != 0 {
+				setRegister(uint16(toregister), uint16(1))
+			} else {
+				setRegister(uint16(toregister), uint16(0))
+			}
+			setRegister(0x001a, ProgramCounter + 3)
+		case 0x17:
+			// XOR
+			// xor <register> <register> <register>
+			toregister := Memory[ProgramCounter+1]
+			regone := Memory[ProgramCounter+2]
+			regtwo := Memory[ProgramCounter+3]
+			if (getRegister(uint16(regone)) == 0 && getRegister(uint16(regtwo)) != 0) || (getRegister(uint16(regone)) != 0 && getRegister(uint16(regtwo)) == 0) {
+				setRegister(uint16(toregister), uint16(1))
+			} else {
+				setRegister(uint16(toregister), uint16(0))
+			}
+			setRegister(0x001a, ProgramCounter + 4)	
 		default:
-			WriteString("FATAL: Illegal instruction "+string(op)+" at location "+string(getRegister(0x001a)), 255, 0)
-			playSound("crash")
+			bios.WriteString("FATAL: Illegal instruction " + string(op) + " at location " + string(getRegister(0x001a)), 255, 0)
+			sound.PlaySound("crash")
 			return
 		}
 	}
@@ -383,11 +424,12 @@ func WindowManage(window *app.Window) error {
 	}
 
 	tex := paint.NewImageOp(img)
+	tex.Filter = paint.FilterNearest
 
 	for {
 		switch E := window.Event().(type) {
 		case app.DestroyEvent:
-			return E.Err	
+			os.Exit(0)
 		case app.FrameEvent:
 			Ready = true
 			GTX := app.NewContext(&ops, E)
@@ -425,8 +467,7 @@ func WindowManage(window *app.Window) error {
 						} else {
 							char = keyboard.Upper(char)
 						}
-
-						fmt.Println("Received key " + char)
+	
     					setRegister(0x001b, uint16(rune(char[0])))
     					intHandler(0x05)
 					}
@@ -470,7 +511,7 @@ func InitializeWindow() {
 			app.Size(320, 200),
 		)
 		if err := WindowManage(w); err != nil {
-			WriteLine("FATAL: Failed to initialize window.", 255, 0)
+			fmt.Println("FATAL: Failed to initialize window.", 255, 0)
 			os.Exit(1)
 		}
 	}()
@@ -480,7 +521,7 @@ func InitializeWindow() {
 func main() {
 	fmt.Printf("\033]0;Luna L2 (Host Console)\007")
 	go func() {
-		if Ready == false {
+		if Ready == false {	
 			for {
 				if Ready == true {
 					break
@@ -489,15 +530,16 @@ func main() {
 				}
 			}
 		}
-		WriteLine("Luna L2", 255, 0)
-		WriteLine("BIOS: Integrated BIOS", 255, 0)
-		WriteLine("Host: " + runtime.GOOS, 255, 0)
-		WriteLine("Host CPU: " + runtime.GOARCH, 255, 0)
-		WriteLine("Copyright (c) 2025 Luna Microsystems LLC\n", 255, 0)
+
+		bios.WriteLine("Luna L2", 255, 0)
+		bios.WriteLine("BIOS: Integrated BIOS", 255, 0)
+		bios.WriteLine("Host: " + runtime.GOOS, 255, 0)
+		bios.WriteLine("Host CPU: " + runtime.GOARCH, 255, 0)
+		bios.WriteLine("Copyright (c) 2025 Luna Microsystems LLC\n", 255, 0)
 
 		if len(os.Args) < 2 {
-			WriteLine("FATAL: Disk image not found.", 255, 0)
-			playSound("crash")
+			bios.WriteLine("FATAL: Disk image not found.", 255, 0)
+			sound.PlaySound("crash")
 			return
 		} 
 
@@ -505,21 +547,19 @@ func main() {
 
 		data, err := os.ReadFile(filename)
 		if err != nil {
-			WriteLine("FATAL: Failed to read disk image '"+filename+"'", 255, 0)
-			playSound("crash")
+			bios.WriteLine("FATAL: Failed to read disk image '"+filename+"'", 255, 0)
+			sound.PlaySound("crash")
 			return
 		}
 
 		if len(data) > 65535 {
-			WriteLine("FATAL: Disk image too large (max 64KiB)", 255, 0)
-			playSound("crash")
+			bios.WriteLine("FATAL: Disk image too large (max 64KiB)", 255, 0)
+			sound.PlaySound("crash")
 			return
 		}
 		copy(Memory[:], data)
 		setRegister(0x0019, uint16(len(data)))
-		fmt.Println("Starting execution...")
 		execute()
-	}()
-	fmt.Println("Initializing window")
+	}()	
 	InitializeWindow()
 }

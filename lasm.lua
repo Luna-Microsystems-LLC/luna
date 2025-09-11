@@ -127,7 +127,23 @@ local instructions = {
     INT = 0x04,
     JNZ = 0x05,
     NOP = 0x06,
-    CMP = 0x07 
+    CMP = 0x07,
+    JZ = 0x08,
+    INC = 0x09,
+    DEC = 0x0a,
+    PUSH = 0x0b,
+    POP = 0x0c,
+    ADD = 0x0d,
+    SUB = 0x0e,
+    MUL = 0x0f,
+    DIV = 0x10,
+    IGT = 0x11,
+    ILT = 0x12,
+    AND = 0x13,
+    OR = 0x14,
+    NOR = 0x15,
+    NOT = 0x16,
+    XOR = 0x17,
 }
 
 local padto = 0
@@ -290,7 +306,7 @@ compile = function(text, args)
         writeToBuf(getInstructionFromName(tokens[1]))
         writeToBuf(register)
         after = 3
-    elseif string.upper(tokens[1]) == "JNZ" then
+    elseif string.upper(tokens[1]) == "JNZ" or string.upper(tokens[1]) == "JZ" then
         local check = tokens[2]
         check = removeComma(check)
         local from = tokens[3]
@@ -348,6 +364,26 @@ compile = function(text, args)
         writeToBufRaw(H)
         writeToBufRaw(L)
         after = 3
+    elseif string.upper(tokens[1]) == "NOP" then
+        writeToBuf(getInstructionFromName(tokens[1]))
+        after = 2
+    elseif string.upper(tokens[1]) == "INC" or string.upper(tokens[1]) == "DEC" or string.upper(tokens[1]) == "PUSH" or string.upper(tokens[1]) == "POP" then
+        writeToBuf(getInstructionFromName(tokens[1]))
+        writeToBuf(getRegisterFromName(tokens[2]))
+        after = 3
+    elseif string.upper(tokens[1]) == "ADD" or string.upper(tokens[1]) == "SUB" or string.upper(tokens[1]) == "MUL" or string.upper(tokens[1]) == "DIV" or string.upper(tokens[1]) == "IGT" or string.upper(tokens[1]) == "ILT" or string.upper(tokens[1]) == "AND" or string.upper(tokens[1]) == "OR" or string.upper(tokens[1]) == "NOR" or string.upper(tokens[1]) == "XOR" then
+        tokens[2] = removeComma(tokens[2])
+        tokens[3] = removeComma(tokens[3])
+        writeToBuf(getInstructionFromName(tokens[1]))
+        writeToBuf(getRegisterFromName(tokens[2]))
+        writeToBuf(getRegisterFromName(tokens[3]))
+        writeToBuf(getRegisterFromName(tokens[4]))
+        after = 5
+    elseif string.upper(tokens[1]) == "NOT" then
+        tokens[2] = removeComma(tokens[2])
+        writeToBuf(getInstructionFromName(tokens[1]))
+        writeToBuf(getRegisterFromName(tokens[2]))
+        writeToBuf(getRegisterFromName(tokens[3]))
     elseif string.upper(tokens[1]) == "DB" then
         local ending = 0
         local tokensToParse = {}
