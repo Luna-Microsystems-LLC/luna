@@ -2,14 +2,14 @@ package main
 
 import (
 	"bytes"
-	_ "embed"
-	"fmt"
+	_ "embed"	
 	"image"
 	"image/color"
 	"io"
 	"os"
 	"runtime"
 	"time"
+	"fmt"
 
 	"luna_l2/font"
 	"luna_l2/video"
@@ -18,6 +18,7 @@ import (
 	"gioui.org/f32"
 	"gioui.org/op"
 	"gioui.org/op/paint"
+	"gioui.org/io/key"
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
@@ -60,10 +61,14 @@ var Registers = []Register{
 	{0x0018, "T12", 0},
 	{0x0019, "SP", 0},
 	{0x001a, "PC", 0},
+	{0x001b, "RE1", 0},
+	{0x001c, "RE2", 0},
+	{0x001d, "RE3", 0},
 }
 
 var Memory [65535]byte
-var Subsystem int = 1
+var Ready bool = false
+var TypeOut bool = false
 
 func setRegister(address uint16, value uint16) {
 	for i := range Registers {
@@ -103,11 +108,7 @@ func playSound(soundName string) {
 }
 
 func WriteChar(char string, fg uint8, bg uint8) {
-	if Subsystem == 1 {
-		video.PrintChar(rune(char[0]), byte(fg), byte(bg), font.Font)
-	} else if Subsystem == 2 {
-		fmt.Printf(string(char[0]))
-	}
+	video.PrintChar(rune(char[0]), byte(fg), byte(bg), font.Font)
 }
 
 func WriteString(str string, fg uint8, bg uint8) {
@@ -117,20 +118,44 @@ func WriteString(str string, fg uint8, bg uint8) {
 }
 
 func WriteLine(str string, fg uint8, bg uint8) {
-	WriteString(str+"\n", fg, bg)
+	WriteString(str + "\n", fg, bg)
 }
 
 func intHandler(code uint16) {
 	if code == 0x01 {
 		// BIOS print to screen
 		// start address in R1
+		// Foreground in R2
+		// Background in R3
 		char := getRegister(0x0001)
-
-		WriteChar(string(rune(char)), 255, 0)
+		WriteChar(string(rune(char)), uint8(getRegister(0x0002)), uint8(getRegister(0x0003)))
 	} else if code == 0x02 {
+		// BIOS sleep
+		// seconds in R1
 		timeToSleep := getRegister(0x0001)
-
 		time.Sleep(time.Second * time.Duration(timeToSleep))
+	} else if code == 0x03 {
+		// BIOS write to VRAM
+		// address in R1, word in R2
+		address := getRegister(0x0001)
+		word := getRegister(0x0002)
+
+		video.MemoryVideo[address] = byte(uint16(word) << 8)
+		video.MemoryVideo[address + 1] = byte(uint16(word) & 0xFF)
+	} else if code == 0x4 {
+		// BIOS configure input mode
+		// Mode 1: no type output
+		// Mode 2: type output
+		// In R1
+		if getRegister(0x0001) == uint16(1) {
+			TypeOut = true
+		} else {
+			TypeOut = false
+		}
+	} else if code == 0x5 {
+		if TypeOut == true {
+			WriteChar(string(rune(getRegister(0x001b))), uint8(255), uint8(0))
+		}
 	}
 }
 
@@ -344,16 +369,12 @@ func WindowManage(window *app.Window) error {
 	var ops op.Ops
 	img := image.NewRGBA(image.Rect(0, 0, 320, 200))
 
-	// Pallete
-	var Palette [256]color.NRGBA
-	for i := 0; i < 256; i++ {
-		Palette[i] = color.NRGBA{uint8(i), uint8(i), uint8(i), 255}
-	}
+	video.InitializePalette()	
 	// Init framebuffer
 	i := 0
 	for y := 0; y < 200; y++ {
 		for x := 0; x < 320; x++ {
-			img.Set(x, y, Palette[uint8(video.MemoryVideo[i])])
+			img.Set(x, y, video.Palette[uint8(video.MemoryVideo[i])])
 			i++
 		}
 	}
@@ -364,18 +385,26 @@ func WindowManage(window *app.Window) error {
 		switch E := window.Event().(type) {
 		case app.DestroyEvent:
 			return E.Err
+		case key.Event:
+			fmt.Println("Key event: " + string(E.Name))
+			setRegister(0x001b, uint16(rune(string(E.Name)[0])))
+			intHandler(0x05)	
 		case app.FrameEvent:
+			Ready = true
 			GTX := app.NewContext(&ops, E)
+
+			paint.Fill(GTX.Ops, color.NRGBA{R: 0, G: 0, B: 0, A: 255})
 
 			i := 0
 			for y := 0; y < 200; y++ {
 				for x := 0; x < 320; x++ {
-					img.Set(x, y, Palette[video.MemoryVideo[i]])
+					img.Set(x, y, video.Palette[video.MemoryVideo[i]])
 					i++
 				}
 			}
 
 			tex = paint.NewImageOp(img)
+			tex.Filter = paint.FilterNearest
 
 			scaleX := float32(GTX.Constraints.Max.X) / float32(320)
 			scaleY := float32(GTX.Constraints.Max.Y) / float32(200)
@@ -411,26 +440,26 @@ func InitializeWindow() {
 
 func main() {
 	go func() {
+		if Ready == false {
+			for {
+				if Ready == true {
+					break
+				} else {
+					time.Sleep(500)
+				}
+			}
+		}
 		WriteLine("Luna L2", 255, 0)
 		WriteLine("BIOS: Integrated BIOS", 255, 0)
-		WriteLine("Host: "+runtime.GOOS, 255, 0)
-		WriteLine("Host CPU: "+runtime.GOARCH, 255, 0)
+		WriteLine("Host: " + runtime.GOOS, 255, 0)
+		WriteLine("Host CPU: " + runtime.GOARCH, 255, 0)
 		WriteLine("Copyright (c) 2025 Luna Microsystems LLC\n", 255, 0)
 
 		if len(os.Args) < 2 {
 			WriteLine("FATAL: Disk image not found.", 255, 0)
 			playSound("crash")
 			return
-		} else if len(os.Args) == 3 {
-			if os.Args[2] == "console" {
-				Subsystem = 2
-			} else if os.Args[2] == "graphical" {
-				Subsystem = 1
-			} else {
-				WriteLine("FATAL: Invalid subsystem (console, graphical)", 255, 0)
-				os.Exit(1)
-			}
-		}
+		} 
 
 		filename := os.Args[1]
 
@@ -447,10 +476,10 @@ func main() {
 			return
 		}
 		copy(Memory[:], data)
-		setRegister(0x0019, uint16(len(data)))	
+		setRegister(0x0019, uint16(len(data)))
+		fmt.Println("Starting execution...")
 		execute()
 	}()
-	if Subsystem == 1 {
-		InitializeWindow()
-	}
+	fmt.Println("Initializing window")
+	InitializeWindow()
 }
