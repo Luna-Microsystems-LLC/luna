@@ -1,32 +1,34 @@
 local registers = {
-    {0x0, "R0"},
-    {0x1, "R1"},
-    {0x2, "R2"},
-    {0x3, "R3"},
-    {0x4, "R4"},
-    {0x5, "R5"},
-    {0x6, "R6"},
-    {0x7, "R7"},
-    {0x8, "R8"},
-    {0x9, "R9"},
-    {0xa, "R10"},
-    {0xb, "R11"},
-    {0xc, "R12"}, 
-    {0xd, "SP"},
-    {0xe, "PC"},
-    {0xf, "T1"},
-    {0x10, "T2"},
-    {0x11, "T3"},
-    {0x12, "T4"},
-    {0x13, "T5"},
-    {0x14, "T6"},
-    {0x15, "T7"},
-    {0x16, "T8"},
-    {0x17, "T9"},
-    {0x19, "T10"},
-    {0x1a, "T11"},
-    {0x1b, "T12"},
-    {0x1c, "PTR"}
+    {0x0000, "R0", 0},
+	{0x0001, "R1", 0},
+	{0x0002, "R2", 0},
+	{0x0003, "R3", 0},
+	{0x0004, "R4", 0},
+	{0x0005, "R5", 0},
+	{0x0006, "R6", 0},
+	{0x0007, "R7", 0},
+	{0x0008, "R8", 0},
+	{0x0009, "R9", 0},
+	{0x000a, "R10", 0},
+	{0x000b, "R11", 0},
+	{0x000c, "R12", 0},
+	{0x000d, "T1", 0},
+	{0x000e, "T2", 0},
+	{0x000f, "T3", 0},
+	{0x0010, "T4", 0},
+	{0x0011, "T5", 0},
+	{0x0012, "T6", 0},
+	{0x0013, "T7", 0},
+	{0x0014, "T8", 0},
+	{0x0015, "T9", 0},
+	{0x0016, "T10", 0},
+	{0x0017, "T11", 0},
+	{0x0018, "T12", 0},
+	{0x0019, "SP", 0},
+	{0x001a, "PC", 0},
+	{0x001b, "RE1", 0},
+	{0x001c, "RE2", 0},
+	{0x001d, "RE3", 0},
 }
 
 local errors = {
@@ -42,10 +44,13 @@ local errors = {
     [10] = "Output machine code too big",
     [11] = "String too long for register (max 2 bytes)",
     [12] = "Putting more than one character to an immediate may have undesirable results",
-    [13] = "Unknown section label"
+    [13] = "Unknown section label",
+    [14] = "Unresolved bindings"
 }
 
-local LabelLocations = {}
+local Bindings = {}
+local UnresolvedBindings = {}
+local UBID = 1
 
 local CurrentSection = "text"
 local DataBuffer = ""
@@ -74,7 +79,12 @@ local function getRegisterFromName(rname, silent)
     end
 end
 
+local TrackWrites = false
+local WriteAdd = 0
 local function writeToBufRaw(text)
+    if TrackWrites == true then
+        WriteAdd = WriteAdd + string.len(text)
+    end
     if CurrentSection == "text" then
         CodeBuffer = CodeBuffer .. text
     elseif CurrentSection == "data" then
@@ -97,9 +107,9 @@ local function writeToBuf(text)
         end
     end
     if CurrentSection == "text" then
-        CodeBuffer = CodeBuffer .. string.char(text)
+        writeToBufRaw(string.char(text))
     else
-        DataBuffer = DataBuffer .. string.char(text)
+        writeToBufRaw(string.char(text))
     end
 end
 
@@ -144,6 +154,8 @@ local instructions = {
     NOR = 0x15,
     NOT = 0x16,
     XOR = 0x17,
+    LOD = 0x18,
+    STR = 0x19,
 }
 
 local padto = 0
@@ -244,118 +256,100 @@ compile = function(text, args)
         return
     end
 
-    if string.upper(tokens[1]) == "MOV" then
+    if string.upper(tokens[1]) == "MOV" or string.upper(tokens[1]) == "JNZ" or string.upper(tokens[1]) == "JZ" or string.upper(tokens[1]) == "JMP" or string.upper(tokens[1]) == "PUSH" then
+        local Noto = false
+        if string.upper(tokens[1]) == "JMP" or string.upper(tokens[1]) == "PUSH" then
+            Noto = true
+        end
+
         local to = tokens[2]
         to = removeComma(to)
-        local from = tokens[3]
-        local mode
-        from = parse(from)
+        local mode 
+
+        if Noto == true then
+            from = parse(tokens[2])
+        else
+            from = parse(tokens[3])
+        end
 
         local Mode = nil
+        local DNR = false 
  
         local FH
         local FL
-
+ 
         if from[2] == "REGISTER" then
             Mode = 2 
         elseif from[2] == "NUMBER" then
             Mode = 1
-            FH, FL = UInt16(tonumber(from[1]))
-            print(string.byte(FH))
-            print(string.byte(FL))
+            FH, FL = UInt16(tonumber(from[1])) 
         elseif from[2] == "SYMBOL" then
-            Mode = 1
-            if not string.sub(from[1], 1, 1) == "\"" or not string.sub(from[1], #from[1], #from[1]) == "\"" then
-                throw("error", 3) 
-            end
-            from[1] = string.gsub(from[1], "\"", "")
-            if string.len(from[1]) > 2 then
-                throw("error", 11)
-            end
- 
-            if string.len(from[1]) == 2 then
-                throw("warning", 12)
-                local Num = "0x"
-                Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 1, 1)))
-                Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 2, 2)))
-                Num = tonumber(Num)
-                FH, FL = UInt16(Num) 
+            Mode = 1 
+            if string.sub(from[1], 1, 1) ~= "\"" or string.sub(from[1], #from[1], #from[1]) ~= "\"" then
+                DNR = true
+                local Found = false
+                writeToBuf(getInstructionFromName(tokens[1]))
+                writeToBufRaw(string.char(0x01))
+                if not Noto then
+                    writeToBuf(getRegisterFromName(to))
+                end
+                for _, Binding in pairs(Bindings) do
+                    local Location = Binding[2]
+                    local Name = Binding[1]
+                    if Name == from[1] then
+                        Found = true
+                        local H, L = UInt16(Location)
+                        writeToBufRaw(H)
+                        writeToBufRaw(L) 
+                    end
+                end
+                if Found == false then 
+                    table.insert(UnresolvedBindings, {UBID, fname})
+                    writeToBufRaw("UNRESOLVED_BINDING_" .. UBID)
+                    UBID = UBID + 1
+                end        
             else
-                local Num = "0x00"
-                Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 1, 1))) 
-                Num = tonumber(Num)
-                FH, FL = UInt16(Num)
+                from[1] = string.gsub(from[1], "\"", "")
+                if string.len(from[1]) > 2 then
+                    throw("error", 11)
+                end
+                if string.len(from[1]) == 2 then
+                    throw("warning", 12)
+                    local Num = "0x"
+                    Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 1, 1)))
+                    Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 2, 2)))
+                    Num = tonumber(Num)
+                    FH, FL = UInt16(Num) 
+                else
+                    local Num = "0x00"
+                    Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 1, 1))) 
+                    Num = tonumber(Num)
+                    FH, FL = UInt16(Num)
+                end 
+            end 
+        end
+
+        if DNR == false then
+            writeToBuf(getInstructionFromName(tokens[1]))
+            writeToBufRaw(string.char(Mode)) 
+            if not Noto then
+                writeToBuf(getRegisterFromName(to))
+            end
+            if FH and FL then
+                writeToBufRaw(FH)
+                writeToBufRaw(FL)
+            else
+                writeToBuf(from)
             end
         end
- 
-        writeToBuf(getInstructionFromName(tokens[1]))
-        writeToBufRaw(string.char(Mode)) 
-        writeToBuf(getRegisterFromName(to))
-        if FH and FL then
-            writeToBufRaw(FH)
-            writeToBufRaw(FL)
+        if Noto == false then
+            after = 4
         else
-            writeToBuf(from)
+            after = 3
         end
-        after = 4 
     elseif string.upper(tokens[1]) == "HLT" then
         writeToBuf(getInstructionFromName(tokens[1]))
-        after = 2
-    elseif string.upper(tokens[1]) == "JMP" then
-        local register = getRegisterFromName(tokens[2])
-        writeToBuf(getInstructionFromName(tokens[1]))
-        writeToBuf(register)
-        after = 3
-    elseif string.upper(tokens[1]) == "JNZ" or string.upper(tokens[1]) == "JZ" then
-        local check = tokens[2]
-        check = removeComma(check)
-        local from = tokens[3]
-        from = parse(from)
-
-        local Mode = nil
-        local FH
-        local FL
-        if from[2] == "REGISTER" then
-            Mode = 2 
-        elseif from[2] == "NUMBER" then
-            Mode = 1
-            FH, FL = UInt16(tonumber(from[1]))
-            print(string.byte(FH))
-            print(string.byte(FL))
-        elseif from[2] == "SYMBOL" then
-            Mode = 1
-            if not string.sub(from[1], 1, 1) == "\"" or not string.sub(from[1], #from[1], #from[1]) == "\"" then
-                throw("error", 3) 
-            end
-            from[1] = string.gsub(from[1], "\"", "")
-            if string.len(from[1]) > 2 then
-                throw("error", 11)
-            end
-            if string.len(from[1]) == 2 then
-                throw("warning", 12)
-                local Num = "0x"
-                Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 1, 1)))
-                Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 2, 2)))
-                Num = tonumber(Num)
-                FH, FL = UInt16(Num) 
-            else
-                local Num = "0x00"
-                Num = Num .. string.format("%02x", string.byte(string.sub(from[1], 1, 1))) 
-                Num = tonumber(Num)
-                FH, FL = UInt16(Num)
-            end
-        end
-
-        writeToBuf(getInstructionFromName(tokens[1]))
-        writeToBufRaw(string.char(Mode))
-        writeToBuf(getRegisterFromName(check))
-        if FH and FL then
-            writeToBufRaw(FH)
-            writeToBufRaw(FL)
-        else
-            writeToBuf(getRegisterFromName(from))
-        end
-        after = 4
+        after = 2 
     elseif string.upper(tokens[1]) == "INT" then
         local number = tokens[2]
         number = tonumber(number)
@@ -367,7 +361,7 @@ compile = function(text, args)
     elseif string.upper(tokens[1]) == "NOP" then
         writeToBuf(getInstructionFromName(tokens[1]))
         after = 2
-    elseif string.upper(tokens[1]) == "INC" or string.upper(tokens[1]) == "DEC" or string.upper(tokens[1]) == "PUSH" or string.upper(tokens[1]) == "POP" then
+    elseif string.upper(tokens[1]) == "INC" or string.upper(tokens[1]) == "DEC" or string.upper(tokens[1]) == "POP" then
         writeToBuf(getInstructionFromName(tokens[1]))
         writeToBuf(getRegisterFromName(tokens[2]))
         after = 3
@@ -379,11 +373,63 @@ compile = function(text, args)
         writeToBuf(getRegisterFromName(tokens[3]))
         writeToBuf(getRegisterFromName(tokens[4]))
         after = 5
-    elseif string.upper(tokens[1]) == "NOT" then
+    elseif string.upper(tokens[1]) == "NOT" or string.upper(tokens[1]) == "LOD"  or string.upper(tokens[1]) == "STR" then
         tokens[2] = removeComma(tokens[2])
         writeToBuf(getInstructionFromName(tokens[1]))
         writeToBuf(getRegisterFromName(tokens[2]))
         writeToBuf(getRegisterFromName(tokens[3]))
+        after = 4
+    elseif string.upper(tokens[1]) == "PCL" then
+        -- Add 2 to stack pointer to set up new stack frame
+        -- Callee's job to pop everything off before or else things
+        -- will go wrong.
+        -- Initial 11
+        writeToBuf(getInstructionFromName("MOV"))
+        writeToBufRaw(string.char(0x01))
+        writeToBuf(getRegisterFromName("R0"))
+        writeToBufRaw("LASM_JLOC")
+        compile([[ 
+        add re1, pc, r0
+        push re1
+        ]], {})
+        TrackWrites = true
+        after = 2
+    elseif string.upper(tokens[1]) == "JCL" then
+        local fname = tokens[2] 
+        local H, L = UInt16(11 + WriteAdd)
+        DataBuffer = string.gsub(DataBuffer, "LASM_JLOC", H .. L)
+        CodeBuffer = string.gsub(CodeBuffer, "LASM_JLOC", H .. L)
+        ExtendedDataBuffer = string.gsub(ExtendedDataBuffer, "LASM_JLOC", H .. L)
+        TrackWrites = false
+        WriteAdd = 0
+        writeToBuf(getInstructionFromName("JMP"))
+        writeToBufRaw(string.char(0x01))
+        local Found = false
+        for _, Binding in pairs(Bindings) do
+            local Location = Binding[2]
+            local Name = Binding[1]
+            if Name == fname then
+                Found = true
+                local H, L = UInt16(Location)
+                writeToBufRaw(H)
+                writeToBufRaw(L) 
+            end
+        end
+        if Found == false then 
+            table.insert(UnresolvedBindings, {UBID, fname})
+            writeToBufRaw("UNRESOLVED_BINDING_" .. UBID)
+            UBID = UBID + 1
+        end
+        after = 3
+    elseif string.upper(tokens[1]) == "RET" then
+        -- Subtract 2 from stack pointer to restore old stack frame
+        compile([[ 
+        pop re1
+        ]], {})
+        writeToBuf(getInstructionFromName("JMP"))
+        writeToBufRaw(string.char(0x02))
+        writeToBuf(getRegisterFromName("RE1"))
+        after = 2
     elseif string.upper(tokens[1]) == "DB" then
         local ending = 0
         local tokensToParse = {}
@@ -497,15 +543,25 @@ compile = function(text, args)
         end
         local varname = tokens[1]
         local value = compile(toParse)
-        writeToBuf(instructions.DSTART)
-        writeToBufRaw(varname)
-        writeToBuf(instructions.DSEP)
-        writeToBufRaw(value)
-        writeToBuf(instructions.DEND)
+        local location = 2 + #DataBuffer
 
+        local H, L = UInt16(location)
+        table.insert(Bindings, {varname, location})
+        writeToBufRaw(value)
         after = ending + 1
         if not tokens[after] then
             after = 0
+        end
+
+        -- Resolve bindings 
+        for _, Binding in pairs(UnresolvedBindings) do
+            local ID = Binding[1]
+            local Name = Binding[2]
+
+            if Name == varname then
+                string.gsub(DataBuffer, "UNRESOLVED_BINDING_" .. ID, H .. L)
+                table.remove(UnresolvedBindings, _)
+            end
         end
     elseif ToTable(tokens[1])[1] == ":" and ToTable(tokens[1])[#tokens[1]] then
         local _end = 0
@@ -533,11 +589,22 @@ compile = function(text, args)
             table.insert(ftokens, tokens[i])
         end
 
-        writeToBuf(instructions.FSTART)
-        writeToBufRaw(name)
-        writeToBuf(instructions.FSEP)
+
+        local location = 2 + #DataBuffer
+        local H, L = UInt16(location)
+        table.insert(Bindings, {name, location})
+
         compile(table.concat(ftokens, " "), {})
-        writeToBuf(instructions.FEND)
+ 
+        for _, Binding in pairs(UnresolvedBindings) do
+            local ID = Binding[1]
+            local Name = Binding[2]
+
+            if Name == name then
+                string.gsub(DataBuffer, "UNRESOLVED_BINDING_" .. ID, H .. L)
+                table.remove(UnresolvedBindings, _)
+            end
+        end
 
         after = _end + 1
     end
@@ -582,6 +649,10 @@ end
 local entry = #DataBuffer + 2
 local H, L = UInt16(entry)
 local buffer = H .. L .. DataBuffer .. CodeBuffer .. "\0" .. ExtendedDataBuffer
+
+if #UnresolvedBindings > 0 then
+    throw("error", 14)
+end
 
 local file = io.open(outfile, "w")
 if not file then error("Could not create file") end
