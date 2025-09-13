@@ -3,12 +3,23 @@ package video
 import (
 	"image/color"
 	"luna_l2/font"
+	"cmp"
 )
 
 var CursorX int = 0
 var CursorY int = 0
 var MemoryVideo [64000]byte
 var Palette [256]color.NRGBA
+
+func Clamp[T cmp.Ordered](x T, min T, max T) T {
+    if x < min {
+        return min
+    }
+    if x > max {
+        return max
+    }
+    return x
+}
 
 func PushChar(x, y int, ch rune, fg byte, bg byte) {
     idx := int(ch)
@@ -30,7 +41,7 @@ func PushChar(x, y int, ch rune, fg byte, bg byte) {
 				color = bg
 			}
 			px := (y+row)*320 + (x+col)
-			MemoryVideo[px] = color
+			MemoryVideo[Clamp(int(px), 0, 63999)] = color
 		}
 
     }
@@ -57,6 +68,9 @@ func PrintChar(ch rune, fg byte, bg byte) {
 		CursorX = 0
 	}
 	if CursorY >= 200/8 {
+		for i := 0; i <= 63999; i++ {
+			MemoryVideo[i] = byte(00)
+		} 
 		CursorY = 0
 	}
 }

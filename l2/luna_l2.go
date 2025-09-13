@@ -163,15 +163,16 @@ func execute() {
 			}
 			setRegister(0x001a, ProgramCounter+1)
 		case 0x03:
-			// JMP
+			// JMP	
 			mode := Memory[ProgramCounter+1]
 
-			if mode == 0x01 {
+			if mode == 0x01 {	
 				loc := uint16(Memory[ProgramCounter+2])<<8 | uint16(Memory[ProgramCounter+3])
 				setRegister(0x001a, loc)
 			} else if mode == 0x02 {
 				frm := uint16(Memory[ProgramCounter+2])
-				setRegister(0x001a, getRegister(frm))
+				loc := getRegister(frm)	
+				setRegister(0x001a, loc)
 			}
 			stall(8)
 		case 0x04:
@@ -189,8 +190,7 @@ func execute() {
 			var not uint16 = 0
 
 			if mode == 0x01 {
-				loc = uint16(Memory[ProgramCounter+3])<<8 | uint16(Memory[ProgramCounter+4])
-				print(string(rune(loc)))
+				loc = uint16(Memory[ProgramCounter+3])<<8 | uint16(Memory[ProgramCounter+4])	
 				not = ProgramCounter + 5
 			} else if mode == 0x02 {
 				frm := uint16(Memory[ProgramCounter+3])
@@ -261,26 +261,32 @@ func execute() {
 			stall(1)
 		case 0x0b:
 			// PUSH
-			// push <register>
-			register := Memory[ProgramCounter+1]
-			value := getRegister(uint16(register))
+			// push <mode> <immediate or register>
+			mode := Memory[ProgramCounter + 1]
+			var value uint16	
+			if mode == 0x1 {
+				value = uint16(Memory[ProgramCounter + 2]) << 8 | uint16(Memory[ProgramCounter + 3])
+				setRegister(0x001a, ProgramCounter + 4)
+			} else if mode == 0x2 {
+				value = getRegister(uint16(Memory[ProgramCounter + 2]))
+				setRegister(0x001a, ProgramCounter + 3)
+			}	
 			sp := getRegister(0x0019)
 			sp += 2
 			Memory[sp] = byte(value & 0xFF)
-			Memory[sp+1] = byte(value >> 8)
-			setRegister(0x0019, uint16(sp))
-			setRegister(0x001a, ProgramCounter+2)
+			Memory[sp+1] = byte(value >> 8)	
+			setRegister(0x0019, uint16(sp))	
 			stall(2)
 		case 0x0c:
 			// POP
-			// pop <register>
+			// pop <register>	
 			register := Memory[ProgramCounter+1]
 			sp := getRegister(0x0019)
 			value := uint16(Memory[sp]) | uint16(Memory[sp+1])<<8
 			setRegister(uint16(register), uint16(value))
-			sp -= 2
+			sp -= 2	
 			setRegister(0x0019, uint16(sp))
-			setRegister(0x001a, ProgramCounter+2)
+			setRegister(0x001a, ProgramCounter+2)	
 			stall(2)
 		case 0x0d:
 			// ADD
@@ -330,6 +336,7 @@ func execute() {
 				setRegister(uint16(toregister), uint16(0))
 			}
 			setRegister(0x001a, ProgramCounter + 4)
+			stall(4)
 		case 0x12:
 			// ILT
 			// ilt <register> <register> <register>
@@ -342,6 +349,7 @@ func execute() {
 				setRegister(uint16(toregister), uint16(0))
 			}
 			setRegister(0x001a, ProgramCounter + 4)
+			stall(4)
 		case 0x13:
 			// AND
 			// and <register> <register> <register>
@@ -354,6 +362,7 @@ func execute() {
 				setRegister(uint16(toregister), uint16(0))
 			}
 			setRegister(0x001a, ProgramCounter + 4)
+			stall(1)
 		case 0x14:
 			// OR
 			// or <register> <register> <register>
@@ -366,6 +375,7 @@ func execute() {
 				setRegister(uint16(toregister), uint16(0))
 			}
 			setRegister(0x001a, ProgramCounter + 4)
+			stall(1)
 		case 0x15:
 			// NOR
 			// nor <register> <register> <register>
@@ -378,6 +388,7 @@ func execute() {
 				setRegister(uint16(toregister), uint16(0))
 			}
 			setRegister(0x001a, ProgramCounter + 4)
+			stall(3)
 		case 0x16:
 			// NOT
 			// not <register> <register>
@@ -389,6 +400,7 @@ func execute() {
 				setRegister(uint16(toregister), uint16(0))
 			}
 			setRegister(0x001a, ProgramCounter + 3)
+			stall(1)
 		case 0x17:
 			// XOR
 			// xor <register> <register> <register>
@@ -400,9 +412,26 @@ func execute() {
 			} else {
 				setRegister(uint16(toregister), uint16(0))
 			}
-			setRegister(0x001a, ProgramCounter + 4)	
+			setRegister(0x001a, ProgramCounter + 4)
+			stall(6)
+		case 0x18:
+			// LOD
+			// lod <addr (register)> <destination register>	
+			addr := getRegister(uint16(Memory[ProgramCounter+1]))
+			toregister := uint16(Memory[ProgramCounter+2])
+			setRegister(toregister, uint16(Memory[addr]))
+			setRegister(0x001a, ProgramCounter + 3)
+			stall(100)
+		case 0x19:
+			// STR
+			// str <addr (register)> <value (register)>	
+			addr := getRegister(uint16(Memory[ProgramCounter+1]))
+			value := uint16(Memory[ProgramCounter+2])
+			Memory[addr] = byte(getRegister(value))	
+			setRegister(0x001a, ProgramCounter + 3)
+			stall(100)
 		default:
-			bios.WriteString("FATAL: Illegal instruction " + string(op) + " at location " + string(getRegister(0x001a)), 255, 0)
+			bios.WriteString("FATAL: Illegal instruction " + fmt.Sprintf("%X", uint16(op)) + " at location " + fmt.Sprintf("%X", getRegister(0x001a)), 255, 0)
 			sound.PlaySound("crash")
 			return
 		}
@@ -478,6 +507,7 @@ func WindowManage(window *app.Window) error {
 			i := 0
 			for y := 0; y < 200; y++ {
 				for x := 0; x < 320; x++ {
+					i = video.Clamp(i, 0, 63999)	
 					img.Set(x, y, video.Palette[video.MemoryVideo[i]])
 					i++
 				}
