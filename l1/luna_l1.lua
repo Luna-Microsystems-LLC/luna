@@ -10,33 +10,33 @@ local execute
 local memory = {} -- 65,535 byte maximum
 local ogimg = {}
 local registers = {
-    {0x0, "R0", 0},
-    {0x1, "R1", 0},
-    {0x2, "R2", 0},
-    {0x3, "R3", 0},
-    {0x4, "R4", 0},
-    {0x5, "R5", 0},
-    {0x6, "R6", 0},
-    {0x7, "R7", 0},
-    {0x8, "R8", 0},
-    {0x9, "R9", 0},
-    {0xa, "R10", 0},
-    {0xb, "R11", 0},
-    {0xc, "R12", 0},
+    {0x0, "R0", nil},
+    {0x1, "R1", nil},
+    {0x2, "R2", nil},
+    {0x3, "R3", nil},
+    {0x4, "R4", nil},
+    {0x5, "R5", nil},
+    {0x6, "R6", nil},
+    {0x7, "R7", nil},
+    {0x8, "R8", nil},
+    {0x9, "R9", nil},
+    {0xa, "R10", nil},
+    {0xb, "R11", nil},
+    {0xc, "R12", nil},
     {0xd, "SP", 0},
     {0xe, "PC", 0},
-    {0xf, "T1", 0},
-    {0x10, "T2", 0},
-    {0x11, "T3", 0},
-    {0x12, "T4", 0},
-    {0x13, "T5", 0},
-    {0x14, "T6", 0},
-    {0x15, "T7", 0},
-    {0x16, "T8", 0},
-    {0x17, "T9", 0},
-    {0x19, "T10", 0},
-    {0x1a, "T11", 0},
-    {0x1b, "T12", 0},
+    {0xf, "T1", nil},
+    {0x10, "T2", nil},
+    {0x11, "T3", nil},
+    {0x12, "T4", nil},
+    {0x13, "T5", nil},
+    {0x14, "T6", nil},
+    {0x15, "T7", nil},
+    {0x16, "T8", nil},
+    {0x17, "T9", nil},
+    {0x19, "T10", nil},
+    {0x1a, "T11", nil},
+    {0x1b, "T12", nil},
     {0x1c, "PTR", 0}
 }
 local PC = 0xe
@@ -45,7 +45,7 @@ local instructions = {
     MOV = 0x01;
     JMP = 0x02;
     JNZ = 0x03;
-    INT = 0x04;
+    SYSCALL = 0x04;
     ADD = 0x05;
     SUB = 0x06;
     MUL = 0x07;
@@ -153,7 +153,24 @@ local function getValueFromRegister(addr)
 end
 
 local function _tonumber(number, silent)
-    return (tonumber(number) or string.byte(value)) & 0xFFFF 
+    local n = tonumber(number)
+
+    if not n then
+        if not silent then
+            print(debug.traceback()); print("[FATAL]: Invalid number '" .. number .. "'")
+            Dump()
+            os.exit(1)
+        end
+        return nil
+    end
+ 
+    if n > 0x7FFF then
+        n = n - 0x10000
+    elseif n < -0x8000 then
+        n = -0x8000
+    end
+
+    return n
 end
 
 
@@ -298,7 +315,7 @@ local function convertToWord(str)
     return {name, total}
 end
 
-local function intHandler()
+local function syscallHandler()
     local func = getValueFromRegister(0x01)
     if func == 0x1 then
         -- Printing to stdout
@@ -564,8 +581,8 @@ execute = function(start, finish, startreal)
         else
             execLocation(getValueFromRegister(0x4))
         end
-    elseif string.byte(primary) == instructions.INT then
-        intHandler()
+    elseif string.byte(primary) == instructions.SYSCALL then
+        syscallHandler()
     elseif string.byte(primary) == instructions.CMP then
         -- Return in r5
         local first = tokens[2]
@@ -586,11 +603,11 @@ execute = function(start, finish, startreal)
             local rsecond = lookupSymbol(valsecond, true)
 
             if not rfirst then
-                rfirst = valfirst
+                rfirst = getValueFromRegister(string.byte(valfirst))
             end
 
             if not rsecond then
-                rsecond = valsecond
+                rsecond = getValueFromRegister(string.byte(valsecond))
             end
 
             if (rfirst == rsecond) then
@@ -716,7 +733,6 @@ execute = function(start, finish, startreal)
         local eaddr = _tonumber(getValueFromRegister(0x03))
 
         local bytes = ""
-        print(saddr, eaddr)
         for i = saddr, eaddr do
             bytes = bytes .. memory[i]
         end

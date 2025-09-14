@@ -123,6 +123,9 @@ func intHandler(code uint16) {
 		if bios.TypeOut == true {
 			bios.WriteChar(string(rune(getRegister(0x001b))), uint8(255), uint8(0))
 		}
+	} else if code == 0x6 {
+		// BIOS shutdown
+		os.Exit(0)
 	}
 }
 
@@ -273,8 +276,8 @@ func execute() {
 			}	
 			sp := getRegister(0x0019)
 			sp += 2
-			Memory[sp] = byte(value & 0xFF)
-			Memory[sp+1] = byte(value >> 8)	
+			Memory[video.Clamp(sp, 0, 65534)] = byte(value & 0xFF)
+			Memory[video.Clamp(sp + 1, 0, 65534)] = byte(value >> 8)	
 			setRegister(0x0019, uint16(sp))	
 			stall(2)
 		case 0x0c:
