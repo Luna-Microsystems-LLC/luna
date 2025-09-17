@@ -135,6 +135,10 @@ func execute() {
 		op := Memory[ProgramCounter]
 
 		if ProgramCounter == 0x0000 {
+			setRegister(0x001a, uint16(0x0003))
+			continue
+		}
+		if ProgramCounter == 0x0003 {
 			codesect := uint16(Memory[ProgramCounter])<<8 | uint16(Memory[ProgramCounter+1])
 			setRegister(0x001a, codesect)
 			continue

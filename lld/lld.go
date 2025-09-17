@@ -64,6 +64,8 @@ func separate(data []byte) {
 			case 0xC2807F:
 				section = "edata"
 				i += 2
+			case 0x4C324F: // File magic number, ignore it
+				i += 2
 			default:
 				write(data[i])
 			}
@@ -101,9 +103,9 @@ func link() {
 		}
 		*buffer = data
 	}
-	process(&DataBuffer, 2)
-	process(&TextBuffer, 2 + len(DataBuffer))
-	process(&ExtendedDataBuffer, 2 + len(DataBuffer) + len(TextBuffer))
+	process(&DataBuffer, 3 + 2)
+	process(&TextBuffer, 3 + 2 + len(DataBuffer))
+	process(&ExtendedDataBuffer, 3 + 2 + len(DataBuffer) + len(TextBuffer))
 }
 
 func main() {
@@ -152,7 +154,8 @@ func main() {
 		error(3, "\n  \"_start\", referenced from\n    <initial-undefines>")	
 	}
 
-	buffer := append([]byte{}, startloc...) 
+	buffer := append([]byte{}, []byte{0x4c, 0x32, 0x45}...)
+	buffer = append(buffer, startloc...) 
 	buffer = append(buffer, DataBuffer...)
 	buffer = append(buffer, TextBuffer...)
 	buffer = append(buffer, ExtendedDataBuffer...)

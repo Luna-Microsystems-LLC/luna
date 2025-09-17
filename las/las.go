@@ -661,7 +661,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	buffer := append([]byte{0xc2, 0x80, 0x7d}, append(DataBuffer, append([]byte{0xc2, 0x80, 0x7e}, append(TextBuffer, append([]byte{0xc2, 0x80, 0x7f}, ExtendedDataBuffer...)...)...)...)...)
+	buffer := append([]byte{0x4c, 0x32, 0x4f, 0xc2, 0x80, 0x7d}, append(DataBuffer, append([]byte{0xc2, 0x80, 0x7e}, append(TextBuffer, append([]byte{0xc2, 0x80, 0x7f}, ExtendedDataBuffer...)...)...)...)...)
 	os.WriteFile(output_filename, buffer, 0644)
 
 	if nolink == false {

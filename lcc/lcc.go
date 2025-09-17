@@ -116,6 +116,8 @@ func main() {
 			assembly_files = append(assembly_files, file)
 		case ".S":
 			assembly_files = append(assembly_files, file)
+		case ".o":
+			object_files = append(object_files, file)
 		default:
 			fmt.Println("\033[1;39mlcc: \033[1;31merror: \033[1;39munknown file type in '" + file + "'\033[0m")
 		}
