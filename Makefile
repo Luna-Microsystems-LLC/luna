@@ -1,10 +1,9 @@
 LUAC=env luac
 LUA=env lua
 SRC=./
-OS := $(shell uname -s)
 
-all: luna-l2 las lcc1 lcc
-.PHONY = clean luna-l1
+all: bin/luna-l2 bin/las bin/lld
+.PHONY: luna-l1 clean install
 
 luna-l1:
 	sudo mkdir -p /usr/local/bin/lvm
@@ -18,31 +17,31 @@ luna-l1:
 	sudo chmod +x /usr/local/bin/lcc-l1
 	sudo chmod +x /usr/local/bin/lasm-l1
 
-luna-l2:
-	cd l2 && sudo go build -o /usr/local/bin/luna-l2 ./luna_l2.go
+bin/luna-l2: $(SRC)/l2/luna_l2.go
+	cd l2 && go build -o ../bin/luna-l2 ./luna_l2.go
 
-las: $(SRC)/lcc_backends/asm.lua
-	sudo mkdir -p /usr/local/bin/lvm
-	sudo $(LUAC) -o /usr/local/bin/lvm/las $(SRC)/lcc_backends/asm.lua
-	sudo printf '#!/bin/sh\n $(LUA) /usr/local/bin/lvm/las "$$@"' > /usr/local/bin/las
-	sudo chmod +x /usr/local/bin/las
+bin/las: $(SRC)/las/las.go
+	cd las && go build -o ../bin/las ./las.go
 
-lcc1: $(SRC)/lcc_backends/c.lua
-	sudo mkdir -p /usr/local/bin/lvm
-	sudo $(LUAC) -o /usr/local/bin/lvm/lcc1 $(SRC)/lcc_backends/c.lua
-	sudo printf '#!/bin/sh\n $(LUA) /usr/local/bin/lvm/lcc1 "$$@"' > /usr/local/bin/lcc1
-	sudo chmod +x /usr/local/bin/lcc1
+bin/lcc1: $(SRC)/lcc1/lcc1.go
+	cd lcc1 && go build -o ../bin/lcc1 ./lcc1.go
 
-lcc: $(SRC)/lcc.lua
-	sudo mkdir -p /usr/local/bin/lvm
-	sudo $(LUAC) -o /usr/local/bin/lvm/lcc $(SRC)/lcc.lua
-	sudo printf '#!/bin/sh\n $(LUA) /usr/local/bin/lvm/lcc "$$@"' > /usr/local/bin/lcc
-	sudo chmod +x /usr/local/bin/lcc
+bin/lcc: $(SRC)/lcc/lcc.go
+	cd lcc && go build -o ../bin/lcc ./lcc.go
+
+bin/lld: $(SRC)/lld/lld.go
+	cd lld && go build -o ../bin/lld ./lld.go
+
+install:
+	sudo cp bin/* /usr/local/bin/
 
 clean:
+	sudo rm -rf /usr/local/bin/lvm
 	sudo rm -f /usr/local/bin/luna-l1
+	sudo rm -f /usr/local/bin/lasm-l1
+	sudo rm -f /usr/local/bin/lcc-l1
 	sudo rm -f /usr/local/bin/luna-l2
 	sudo rm -f /usr/local/bin/las
 	sudo rm -f /usr/local/bin/lcc1
 	sudo rm -f /usr/local/bin/lcc
-	sudo rm -rf /usr/local/bin/lvm
+	sudo rm -f /usr/local/bin/lld

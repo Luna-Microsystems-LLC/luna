@@ -3,28 +3,29 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
 	"strconv"
+	"strings"
 )
 
 var section string = "text"
 var input_files []string
-var DataBuffer string = ""
-var TextBuffer string = ""
-var ExtendedDataBuffer string = ""
+var DataBuffer []byte
+var TextBuffer []byte
+var ExtendedDataBuffer []byte
 var current_filename string = ""
 
-func write(text string) {
-	if section == "data" {
-		DataBuffer = DataBuffer + text
-	} else if section == "edata" {
-		ExtendedDataBuffer = ExtendedDataBuffer + text
-	} else if section == "text" {
-		TextBuffer = TextBuffer + text
+func write(b []byte) {
+	switch section {
+	case "data":
+		DataBuffer = append(DataBuffer, b...)
+	case "text":
+		TextBuffer = append(TextBuffer, b...)
+	case "edata":
+		ExtendedDataBuffer = append(ExtendedDataBuffer, b...)
 	}
 }
 
-func isRegister(word string) int {
+func isRegister(word string) byte {
 	switch word {
 	case "r0":
 		return 0x00
@@ -87,11 +88,11 @@ func isRegister(word string) int {
 	case "re3":
 		return 0x1d
 	default:
-		return -1
+		return 0xff
 	}
 }
 
-var errors = []string {
+var errors = []string{
 	"no input files",
 	"no such file or directory",
 	"invalid register name",
@@ -99,10 +100,12 @@ var errors = []string {
 	"invalid instruction mnemonic",
 	"immediate value too large",
 	"missing terminating '\"' character",
+	"expected string",
 }
 var nocont bool = false
 var Errors int
 var Warnings int
+
 func error(errno int, args string) {
 	label := ""
 
@@ -117,29 +120,45 @@ func error(errno int, args string) {
 	nocont = true
 }
 
-func parse(text string) string {
+func parse(text string) []byte {
 	// Check for number
 	if _, err := strconv.Atoi(text); err == nil {
 		num, _ := strconv.Atoi(text)
 
 		high := byte(num >> 8)
 		low := byte(num & 0xFF)
-		return string([]byte{high, low})
+		return []byte{high, low}
 	}
-	if isRegister(text) != -1 {
-		return string(byte(isRegister(text)))
+	if isRegister(text) != 0xff {
+		print(text + "\n")
+		return []byte{byte(isRegister(text))}
 	}
 	if string(text[0]) == "\"" {
-		if string(text[len(text) - 1]) != "\"" {
+		if string(text[len(text)-1]) != "\"" {
 			error(6, "")
 		}
 		text = strings.Trim(text, "\"")
 		if len(text) > 2 {
-			error(5, "'" + text + "'")
+			error(5, "'"+text+"'")
+		} else if len(text) == 1 {
+			text = string(byte(00)) + text
 		}
-		return text
+		return []byte(text)
 	}
-	return "LINKER_SYMBOL_" + text	
+	return append([]byte("LR_"+text), 0x00)
+}
+
+func formatString(text string) string {
+	var replace = [][2]string {
+		{"\\0", "\000"},
+		{"\\n", "\n"},
+		{"\\r", "\r"},
+		{"\\033", "\033"},
+	}
+	for _, pair := range replace {
+		text = strings.ReplaceAll(text, pair[0], pair[1])
+	}
+	return text
 }
 
 func assemble(text string) {
@@ -150,7 +169,7 @@ func assemble(text string) {
 	}
 
 	for i := 0; i < len(words); i++ {
-		if strings.HasSuffix(words[i], ":") {	
+		if strings.HasSuffix(words[i], ":") {
 			end := len(words)
 			for j := i + 1; j < len(words); j++ {
 				if strings.HasSuffix(words[j], ":") {
@@ -159,15 +178,18 @@ func assemble(text string) {
 				}
 			}
 
-			tocompile := words[i + 1 : end]
-			if len(tocompile) > 0 {	
+			words[i] = strings.TrimSuffix(words[i], ":")
+			write(append([]byte("LD_"+words[i]), 0x00))
+
+			tocompile := words[i+1 : end]
+			if len(tocompile) > 0 {
 				assemble(strings.Join(tocompile, " "))
 			}
 
 			i = end - 1
 			continue
 		}
-		
+
 		words[i] = strings.ToLower(words[i])
 		switch words[i] {
 		case ".data":
@@ -177,53 +199,403 @@ func assemble(text string) {
 		case ".edata":
 			section = "edata"
 		case "mov":
-			write(string(byte(0x01)))
-	
-			if isRegister(words[i + 2]) == -1 {	
-				write(string(byte(0x01)))
+			write([]byte{0x01})
+
+			var mode byte
+			if isRegister(words[i+2]) == 0xff {
+				mode = 0x01
 			} else {
-				write(string(byte(0x02)))
+				mode = 0x02
 			}
+			write([]byte{mode})
 
-			register := isRegister(words[i + 1])
-			if register == -1 {
-				error(2, "'" + words[i + 1] + "'")
-				continue
+			dst := isRegister(words[i+1])
+			if dst == 0xff {
+				error(2, "'"+words[i+1]+"'")
 			}
-			write(string(byte(register)))
+			write([]byte{dst})
 
-			value := parse(words[i + 2])
-			write(value)
+			if mode == 0x02 {
+				src := isRegister(words[i+2])
+				write([]byte{src})
+			} else {
+				value := parse(words[i+2])
+				write(value)
+			}
 			i = i + 2
 		case "hlt":
-			write(string(byte(0x02)))
+			write([]byte{0x02})
 		case "jmp":
-			write(string(byte(0x03)))
-			if isRegister(words[i + 1]) == -1 {	
-				write(string(byte(0x01)))
+			write([]byte{0x03})
+
+			if isRegister(words[i+1]) == 0xff {
+				write([]byte{0x01})
 			} else {
-				write(string(byte(0x02)))
+				write([]byte{0x02})
 			}
-			write(parse(words[i + 1]))
-			i = i + 1 
+
+			value := parse(words[i+1])
+			write(value)
+			i = i + 1
 		case "int":
-			write(string(byte(0x04)))
-			value := parse(words[i + 1])
+			write([]byte{0x04})
+			value := parse(words[i+1])
 			if len(value) > 2 {
-				error(3, "'" + value + "'")
-				continue
+				error(3, "'"+string(value)+"'")
 			}
 			write(value)
 			i = i + 1
+		case "jnz":
+			write([]byte{0x05})
+
+			if isRegister(words[i+2]) == 0xff {
+				write([]byte{0x01})
+			} else {
+				write([]byte{0x02})
+			}
+
+			register := isRegister(words[i+1])
+			if register == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			write([]byte{register})
+
+			value := parse(words[i+2])
+			write(value)
+			i = i + 2
+		case "nop":
+			write([]byte{0x06})
+		case "cmp":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			two := isRegister(words[i+3])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			if two == 0xff {
+				error(2, "'"+words[i+3]+"'")
+			}
+			write([]byte{0x07})
+			write([]byte{check})
+			write([]byte{one})
+			write([]byte{two})
+			i = i + 3
+		case "jz":
+			write([]byte{0x08})
+
+			if isRegister(words[i+2]) == 0xff {
+				write([]byte{0x01})
+			} else {
+				write([]byte{0x02})
+			}
+
+			register := isRegister(words[i+1])
+			if register == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			write([]byte{register})
+
+			value := parse(words[i+2])
+			write(value)
+			i = i + 2
+		case "inc":
+			write([]byte{0x09})
+			reg := isRegister(words[i+1])
+			if reg == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			write([]byte{reg})
+			i = i + 1
+		case "dec":
+			write([]byte{0x0a})
+			reg := isRegister(words[i+1])
+			if reg == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			write([]byte{reg})
+			i = i + 1
+		case "push":
+			write([]byte{0x0b})
+			if isRegister(words[i+1]) == 0xff {
+				write([]byte{0x01})
+			} else {
+				write([]byte{0x02})
+			}
+			write(parse(words[i+1]))
+			i = i + 1
+		case "pop":
+			write([]byte{0x0c})
+			reg := isRegister(words[i+1])
+			if reg == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			write([]byte{reg})
+			i = i + 1
+		case "add":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			two := isRegister(words[i+3])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			if two == 0xff {
+				error(2, "'"+words[i+3]+"'")
+			}
+			write([]byte{0x0d})
+			write([]byte{check})
+			write([]byte{one})
+			write([]byte{two})
+			i = i + 3
+		case "sub":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			two := isRegister(words[i+3])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			if two == 0xff {
+				error(2, "'"+words[i+3]+"'")
+			}
+			write([]byte{0x0e})
+			write([]byte{check})
+			write([]byte{one})
+			write([]byte{two})
+			i = i + 3
+		case "mul":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			two := isRegister(words[i+3])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			if two == 0xff {
+				error(2, "'"+words[i+3]+"'")
+			}
+			write([]byte{0x0f})
+			write([]byte{check})
+			write([]byte{one})
+			write([]byte{two})
+			i = i + 3
+		case "div":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			two := isRegister(words[i+3])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			if two == 0xff {
+				error(2, "'"+words[i+3]+"'")
+			}
+			write([]byte{0x10})
+			write([]byte{check})
+			write([]byte{one})
+			write([]byte{two})
+			i = i + 3
+		case "igt":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			two := isRegister(words[i+3])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			if two == 0xff {
+				error(2, "'"+words[i+3]+"'")
+			}
+			write([]byte{0x11})
+			write([]byte{check})
+			write([]byte{one})
+			write([]byte{two})
+			i = i + 3
+		case "ilt":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			two := isRegister(words[i+3])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			if two == 0xff {
+				error(2, "'"+words[i+3]+"'")
+			}
+			write([]byte{0x12})
+			write([]byte{check})
+			write([]byte{one})
+			write([]byte{two})
+			i = i + 3
+		case "and":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			two := isRegister(words[i+3])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			if two == 0xff {
+				error(2, "'"+words[i+3]+"'")
+			}
+			write([]byte{0x13})
+			write([]byte{check})
+			write([]byte{one})
+			write([]byte{two})
+			i = i + 3
+		case "or":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			two := isRegister(words[i+3])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			if two == 0xff {
+				error(2, "'"+words[i+3]+"'")
+			}
+			write([]byte{0x14})
+			write([]byte{check})
+			write([]byte{one})
+			write([]byte{two})
+			i = i + 3
+		case "nor":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			two := isRegister(words[i+3])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			if two == 0xff {
+				error(2, "'"+words[i+3]+"'")
+			}
+			write([]byte{0x15})
+			write([]byte{check})
+			write([]byte{one})
+			write([]byte{two})
+			i = i + 3
+		case "not":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			write([]byte{0x16})
+			write([]byte{check})
+			write([]byte{one})
+			i = i + 2
+		case "xor":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			two := isRegister(words[i+3])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			if two == 0xff {
+				error(2, "'"+words[i+3]+"'")
+			}
+			write([]byte{0x17})
+			write([]byte{check})
+			write([]byte{one})
+			write([]byte{two})
+			i = i + 3
+		case "lod":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			write([]byte{0x18})
+			write([]byte{check})
+			write([]byte{one})
+			i = i + 2
+		case "str":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			write([]byte{0x19})
+			write([]byte{check})
+			write([]byte{one})
+			i = i + 2
+		case ".ascii":	
+			var value string	
+
+			var tokens = []string {}
+			
+			if string(words[i+1][0]) != "\"" {
+				error(7, "'" + words[i+1] + "'")
+			}
+			if strings.HasSuffix(words[i + 1], "\"") {
+				value = strings.Trim(words[i + 1], "\"")
+				value = formatString(value)
+				write([]byte(value))
+				i = i + 1
+				continue
+			}
+			
+			ending := 0
+			for j := i + 1; j < len(words); j++ {
+				tokens = append(tokens, words[j])
+				if strings.HasSuffix(words[j], "\"") {
+					ending = j
+					break
+				}
+			}
+			if ending == 0 {
+				error(6, "'" + words[i + 1] + "'")
+			}
+			
+			tokens[0] = strings.TrimPrefix(tokens[0], "\"")
+			tokens[len(tokens) - 1] = strings.TrimSuffix(tokens[len(tokens) - 1], "\"")
+			value = strings.Join(tokens, " ")
+			value = formatString(value)
+			write([]byte(value))
+			i = ending
 		default:
-			error(4, "'" + words[i] + "'")
+			error(4, "'"+words[i]+"'")
 		}
 	}
 }
 
 func main() {
 	if len(os.Args) < 2 {
-		error(0, "")	
+		error(0, "")
 		os.Exit(1)
 	}
 
@@ -235,11 +607,11 @@ func main() {
 
 		switch arg {
 		case "-v":
-			fmt.Println("Luna Compiler Collection v2.0")
+			fmt.Println("Luna Compiler Collection version 2.0")
 			fmt.Println("Target: luna-l2")
 			os.Exit(0)
 		case "-o":
-			output_filename = os.Args[i + 1]
+			output_filename = os.Args[i+1]
 			i++
 		case "-c":
 			nolink = true
@@ -290,10 +662,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	buffer := "__data" + DataBuffer + string(byte(00)) + "__text" + TextBuffer + string(byte(00)) + "__edata" + ExtendedDataBuffer
-	os.WriteFile(output_filename, []byte(buffer), 0644)
+	buffer := append([]byte{0xc2, 0x80, 0x7d}, append(DataBuffer, append([]byte{0xc2, 0x80, 0x7e}, append(TextBuffer, append([]byte{0xc2, 0x80, 0x7f}, ExtendedDataBuffer...)...)...)...)...)
+	os.WriteFile(output_filename, buffer, 0644)
 
 	if nolink == false {
-
+		
 	}
 }
