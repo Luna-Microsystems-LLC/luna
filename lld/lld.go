@@ -3,7 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
-	"bytes"	
+	"bytes"
+	"strings"
 )
 
 type binding struct {
@@ -140,10 +141,13 @@ func main() {
 			error(1, "path=" + file)
 		}	
 
-		separate(data)
-		link()
+		separate(data)		
 	}
+
+	link()
 	startloc, found := checkBinding("_start")
+
+
 	if found == false {
 		error(3, "\n  \"_start\", referenced from\n    <initial-undefines>")	
 	}
@@ -152,5 +156,19 @@ func main() {
 	buffer = append(buffer, DataBuffer...)
 	buffer = append(buffer, TextBuffer...)
 	buffer = append(buffer, ExtendedDataBuffer...)
+
+	location := bytes.Index(buffer, []byte("LR_"))
+	if location != -1 {
+		name := ""
+		for i := location; i < len(buffer); i++ {
+			if buffer[i] != 0x00 {
+				name = name + string(buffer[i])
+			} else {
+				break
+			}
+		}
+		name = strings.TrimPrefix(name, "LR_")
+		error(3, "\n  \"" + name + "\", referenced from\n    <initial-undefines>")
+	}
 	os.WriteFile(output_filename, []byte(buffer), 0644)
 }

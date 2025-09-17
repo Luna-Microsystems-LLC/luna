@@ -2,8 +2,9 @@ LUAC=env luac
 LUA=env lua
 SRC=./
 
-all: bin/luna-l2 bin/las bin/lld
-.PHONY: luna-l1 clean install
+all: bin/luna-l2 bin/las bin/lld bin/lcc 
+legacy: luna-l1
+.PHONY: clean install
 
 luna-l1:
 	sudo mkdir -p /usr/local/bin/lvm

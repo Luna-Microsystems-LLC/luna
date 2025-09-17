@@ -552,7 +552,6 @@ func InitializeWindow() {
 }
 
 func main() {
-	fmt.Printf("\033]0;Luna L2 (Host Console)\007")
 	go func() {
 		if Ready == false {	
 			for {

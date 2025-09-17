@@ -129,8 +129,7 @@ func parse(text string) []byte {
 		low := byte(num & 0xFF)
 		return []byte{high, low}
 	}
-	if isRegister(text) != 0xff {
-		print(text + "\n")
+	if isRegister(text) != 0xff {	
 		return []byte{byte(isRegister(text))}
 	}
 	if string(text[0]) == "\"" {

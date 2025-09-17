@@ -1,13 +1,15 @@
 # Luna<br>
-A RISC-like virtual machine and toolchain.<br><br>
+A simple, lightweight RISC CPU architecture.<br><br>
 
 # Requirements<br>
-1. Lua 5.4 or newer - LASM and LCC are written in Lua as of now and use relatively new Lua features, so you need version 5.4.<br>
+- Windows, MacOS, Linux, or FreeBSD<br>
+- Lua (only if you want to run the legacy Luna L1 virtual machine and tools)<br><br>
 
-# Getting started<br>
-First, clone the repository to your system using `git clone`.<br>
-After, simply enter the directory and run `make` which will install the **latest CPU** onto your system.<br>
-If you'd like to install an older CPU, simply run `make luna-l1` for example, to make the L1 version of the Luna CPU.<br><br>
+# Installation (MacOS, Linux, FreeBSD)<br>
+- Clone the repository using `git clone`<br>
+- Navigate into the directory<br>
+- Run `make; make install` to install the Luna L2 virtual machine, the Luna Compiler collection (`lcc`), and the Luna linker (`lld`)<br>
+- Run `luna-l2 <disk image>` to run an application.<br>
+- Note: if you would like to install the legacy Luna L1 architecture, run `make legacy` to install it as well as the assembler and C compiler. Then run `luna-l1 <disk image>` to run an application.<br>
 
-# Running a program<br>
-To run a program, run `luna-<arch> <disk image>`<br><br>
+# 
