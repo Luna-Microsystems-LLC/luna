@@ -123,9 +123,6 @@ func intHandler(code uint16) {
 		if bios.TypeOut == true {
 			bios.WriteChar(string(rune(getRegister(0x001b))), uint8(255), uint8(0))
 		}
-	} else if code == 0x6 {
-		// BIOS shutdown
-		os.Exit(0)
 	}
 }
 
@@ -574,7 +571,7 @@ func main() {
 		bios.WriteLine("Copyright (c) 2025 Luna Microsystems LLC\n", 255, 0)
 
 		if len(os.Args) < 2 {
-			bios.WriteLine("FATAL: Disk image not found.", 255, 0)
+			bios.WriteLine("FATAL: Disk image not found", 255, 0)
 			sound.PlaySound("crash")
 			return
 		} 
@@ -594,6 +591,11 @@ func main() {
 			return
 		}
 		copy(Memory[:], data)
+		if Memory[0x0000] != 0x4C || Memory[0x0001] != 0x32 || Memory[0x0002] != 0x45 {
+			bios.WriteLine("FATAL: Invalid disk image", 255, 0)
+			sound.PlaySound("crash")
+			return
+		}
 		setRegister(0x0019, uint16(len(data)))
 		execute()
 	}()	

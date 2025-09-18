@@ -13,7 +13,7 @@ func execute(command string, displayError bool) bool {
 	shell := "sh"
 	flag := "-c"
 	if runtime.GOOS == "windows" {
-		shell = "bash"
+		shell = "cmd"
 		flag = "/C"
 	}
 
