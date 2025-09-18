@@ -554,7 +554,6 @@ func assemble(text string) {
 			i = i + 2
 		case ".ascii":	
 			var value string	
-
 			var tokens = []string {}
 			
 			if string(words[i+1][0]) != "\"" {
@@ -584,6 +583,41 @@ func assemble(text string) {
 			tokens[len(tokens) - 1] = strings.TrimSuffix(tokens[len(tokens) - 1], "\"")
 			value = strings.Join(tokens, " ")
 			value = formatString(value)
+			write([]byte(value))
+			i = ending
+		case ".asciz":	
+			var value string	
+			var tokens = []string {}
+			
+			if string(words[i+1][0]) != "\"" {
+				error(7, "'" + words[i+1] + "'")
+			}
+			if strings.HasSuffix(words[i + 1], "\"") {
+				value = strings.Trim(words[i + 1], "\"")
+				value = formatString(value)
+				value = value + string("\000")
+				write([]byte(value))
+				i = i + 1
+				continue
+			}
+			
+			ending := 0
+			for j := i + 1; j < len(words); j++ {
+				tokens = append(tokens, words[j])
+				if strings.HasSuffix(words[j], "\"") {
+					ending = j
+					break
+				}
+			}
+			if ending == 0 {
+				error(6, "'" + words[i + 1] + "'")
+			}
+			
+			tokens[0] = strings.TrimPrefix(tokens[0], "\"")
+			tokens[len(tokens) - 1] = strings.TrimSuffix(tokens[len(tokens) - 1], "\"")
+			value = strings.Join(tokens, " ")
+			value = formatString(value)
+			value = value + string("\000")
 			write([]byte(value))
 			i = ending
 		default:
