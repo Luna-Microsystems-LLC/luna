@@ -131,7 +131,10 @@ func main() {
 
 	for _, file := range assembly_files {
 		name, _ := splitFile(file)		
-		execute("las " + file + " -o " + name + ".o", false)
+		success := execute("las " + file + " -o " + name + ".o", false)
+		if success != true {
+			os.Exit(1)
+		}
 		object_files = append(object_files, name + ".o")
 		cleanup = append(cleanup, name + ".o")
 	}

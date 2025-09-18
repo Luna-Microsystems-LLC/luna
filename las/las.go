@@ -178,7 +178,7 @@ func assemble(text string) {
 			}
 
 			words[i] = strings.TrimSuffix(words[i], ":")
-			write(append([]byte("LD_"+words[i]), 0x00))
+			write(append([]byte("LD_" + words[i]), 0x00))
 
 			tocompile := words[i+1 : end]
 			if len(tocompile) > 0 {
