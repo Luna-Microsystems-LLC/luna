@@ -2,7 +2,7 @@ LUAC=env luac
 LUA=env lua
 SRC=./
 
-all: bin/luna-l2 bin/las bin/lld bin/lcc bin/lcc1 
+all: bin/luna-l2 bin/las bin/l2ld bin/lcc bin/lcc1 
 legacy: luna-l1
 .PHONY: clean install
 
@@ -30,8 +30,8 @@ bin/lcc1: $(SRC)/lcc1/lcc1.go
 bin/lcc: $(SRC)/lcc/lcc.go
 	cd lcc && go build -o ../bin/lcc ./lcc.go
 
-bin/lld: $(SRC)/lld/lld.go
-	cd lld && go build -o ../bin/lld ./lld.go
+bin/l2ld: $(SRC)/l2ld/l2ld.go
+	cd l2ld && go build -o ../bin/l2ld ./l2ld.go
 
 install:
 	sudo cp bin/* /usr/local/bin/

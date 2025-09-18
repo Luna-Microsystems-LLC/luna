@@ -131,7 +131,7 @@ func main() {
 
 	for _, file := range assembly_files {
 		name, _ := splitFile(file)		
-		success := execute("las " + file + " -o " + name + ".o", false)
+		success := execute("las " + file + " -c -o " + name + ".o", false)
 		if success != true {
 			os.Exit(1)
 		}
@@ -145,7 +145,7 @@ func main() {
 	
 	// Third pass: link all assembly files to final executable
 
-	success := execute("lld " + strings.Join(object_files, " ") + " -o " + output_file, false)
+	success := execute("l2ld " + strings.Join(object_files, " ") + " -o " + output_file, false)
 	if success != true {
 		cleanupFiles(cleanup)
 		fmt.Println("\033[1;39mlcc: \033[1;31merror: \033[1;39mlinker command failed.\033[0m")

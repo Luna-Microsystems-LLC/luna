@@ -5,6 +5,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"runtime"
+	"os/exec"
+	"path/filepath"
 )
 
 var section string = "text"
@@ -13,6 +16,24 @@ var DataBuffer []byte
 var TextBuffer []byte
 var ExtendedDataBuffer []byte
 var current_filename string = ""
+
+func execute(command string) bool {
+	shell := "sh"
+	flag := "-c"
+	if runtime.GOOS == "windows" {
+		shell = "cmd"
+		flag = "/C"
+	}
+
+	cmd := exec.Command(shell, flag, command)
+	output, err := cmd.CombinedOutput()
+	fmt.Printf(string(output))
+
+	if err != nil {
+		return false	
+	}
+	return true
+}
 
 func write(b []byte) {
 	switch section {
@@ -102,7 +123,6 @@ var errors = []string{
 	"missing terminating '\"' character",
 	"expected string",
 }
-var nocont bool = false
 var Errors int
 var Warnings int
 
@@ -117,7 +137,6 @@ func error(errno int, args string) {
 
 	fmt.Println("\033[1;39m" + label + ": \033[1;31merror: \033[1;39m" + errors[errno] + " " + args + "\033[0m")
 	Errors++
-	nocont = true
 }
 
 func parse(text string) []byte {
@@ -626,6 +645,27 @@ func assemble(text string) {
 	}
 }
 
+func splitFile(path string) (name string, ext string) {
+	ext = filepath.Ext(path)
+	name = filepath.Base(path)	
+	if ext != "" {
+		name = name[:len(name)-len(ext)]
+	}
+	return
+}
+
+func cleanupFiles(files []string) {
+	if runtime.GOOS != "windows" {
+		for _, file := range files {
+			execute("rm -f " + file)
+		}
+	} else {
+		for _, file := range files {
+			execute("del /f " + file)
+		}
+	}
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		error(0, "")
@@ -634,6 +674,7 @@ func main() {
 
 	var output_filename string = ""
 	var nolink bool = false
+	var object_files = []string {}
 
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
@@ -654,7 +695,11 @@ func main() {
 	}
 
 	if output_filename == "" {
-		output_filename = "a.o"
+		if nolink == false {
+			output_filename = "a.bin"
+		} else {
+			output_filename = "a.o"
+		}
 	}
 
 	for _, file := range input_files {
@@ -664,41 +709,57 @@ func main() {
 			os.Exit(1)
 		}
 		current_filename = file
+		// Assemble everything
 		assemble(string(data))
-	}
-
-	var error_str string = ""
-	if Warnings > 0 {
-		error_str = error_str + fmt.Sprintf("%d", Warnings) + " warning"
-		if Warnings > 1 {
-			error_str = error_str + "s"
+		// Error checking
+		var error_str string = ""
+		if Warnings > 0 {
+			error_str = error_str + fmt.Sprintf("%d", Warnings) + " warning"
+			if Warnings > 1 {
+				error_str = error_str + "s"
+			}
+			if Errors > 0 {
+				error_str = error_str + " and "
+			} else {
+				error_str = error_str + " generated."
+			}
 		}
 		if Errors > 0 {
-			error_str = error_str + " and "
-		} else {
+			error_str = error_str + fmt.Sprintf("%d", Errors) + " error"
+			if Errors > 1 {
+				error_str = error_str + "s"
+			}
 			error_str = error_str + " generated."
 		}
-	}
-	if Errors > 0 {
-		error_str = error_str + fmt.Sprintf("%d", Errors) + " error"
-		if Errors > 1 {
-			error_str = error_str + "s"
+		if Errors > 0 || Warnings > 0 {
+			fmt.Println(error_str)
 		}
-		error_str = error_str + " generated."
+		if Errors > 0 {
+			continue
+		}
+		// Write everything
+		name, _ := splitFile(file)
+		buffer := append([]byte{0x4c, 0x32, 0x4f, 0xc2, 0x80, 0x7d}, append(DataBuffer, append([]byte{0xc2, 0x80, 0x7e}, append(TextBuffer, append([]byte{0xc2, 0x80, 0x7f}, ExtendedDataBuffer...)...)...)...)...)
+		os.WriteFile(name + ".o", buffer, 0644)
+		object_files = append(object_files, name + ".o")
+		// Reset
+		Errors = 0
+		Warnings = 0
+		DataBuffer = []byte {}
+		TextBuffer = []byte {}
+		ExtendedDataBuffer = []byte {}
+		section = "text"
+	}	
+
+	if nolink == true {
+		os.Exit(0)
 	}
 
-	if Errors > 0 || Warnings > 0 {
-		fmt.Println(error_str)
-	}
-
-	if nocont == true {
+	success := execute("l2ld " + strings.Join(object_files, " ") + " -o " + output_filename)
+	if success != true {
+		cleanupFiles(object_files)
+		fmt.Println("\033[1;39mlcc: \033[1;31merror: \033[1;39mlinker command failed.\033[0m")
 		os.Exit(1)
 	}
-
-	buffer := append([]byte{0x4c, 0x32, 0x4f, 0xc2, 0x80, 0x7d}, append(DataBuffer, append([]byte{0xc2, 0x80, 0x7e}, append(TextBuffer, append([]byte{0xc2, 0x80, 0x7f}, ExtendedDataBuffer...)...)...)...)...)
-	os.WriteFile(output_filename, buffer, 0644)
-
-	if nolink == false {
-		
-	}
+	cleanupFiles(object_files)
 }
