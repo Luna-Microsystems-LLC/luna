@@ -74,7 +74,7 @@ func separate(data []byte) {
 }
 
 func link() {
-	process := func(buffer *[]byte, offset int) {
+	collect := func(buffer *[]byte, offset int) {
 		data := *buffer
 		for i := 0; i < len(data); i++ {
 			if bytes.HasPrefix(data[i:], []byte("LD_")) {
@@ -86,26 +86,28 @@ func link() {
 				data = append(data[:i], data[j + 1:]...)
 			
 				location := i + offset
-				H := byte(location >> 8)
+				H := byte(location >> 8)	
 				L := byte(location & 0xFF)
 
 				_, ok := checkBinding(name)
 				if ok != false {
 					error(2, "`" + name + "'")
 				}
-				bindings = append(bindings, binding{Name: name, Location: []byte{H, L}})
-
-				ref := append([]byte("LR_" + name), 0x00)	
-				DataBuffer = bytes.ReplaceAll(DataBuffer, ref, []byte{H, L})
-				TextBuffer = bytes.ReplaceAll(TextBuffer, ref, []byte{H, L})
-				ExtendedDataBuffer = bytes.ReplaceAll(ExtendedDataBuffer, ref, []byte{H, L})
+				bindings = append(bindings, binding{Name: name, Location: []byte{H, L}})	
 			}
 		}
 		*buffer = data
 	}
-	process(&DataBuffer, 3 + 2)
-	process(&TextBuffer, 3 + 2 + len(DataBuffer))
-	process(&ExtendedDataBuffer, 3 + 2 + len(DataBuffer) + len(TextBuffer))
+	collect(&DataBuffer, 3 + 2)
+	collect(&TextBuffer, 3 + 2 + len(DataBuffer))
+	collect(&ExtendedDataBuffer, 3 + 2 + len(DataBuffer) + len(TextBuffer))
+
+	for _, b := range bindings {
+		ref := append([]byte("LR_" + b.Name), 0x00)
+		DataBuffer = bytes.ReplaceAll(DataBuffer, ref, b.Location)
+		TextBuffer = bytes.ReplaceAll(TextBuffer, ref, b.Location)
+		ExtendedDataBuffer = bytes.ReplaceAll(ExtendedDataBuffer, ref, b.Location)
+	}
 }
 
 func main() {
@@ -148,8 +150,6 @@ func main() {
 
 	link()
 	startloc, found := checkBinding("_start")
-
-
 	if found == false {
 		error(3, "\n  \"_start\", referenced from\n    <initial-undefines>")	
 	}

@@ -2,7 +2,7 @@ LUAC=env luac
 LUA=env lua
 SRC=./
 
-all: bin/luna-l2 bin/las bin/lld bin/lcc 
+all: bin/luna-l2 bin/las bin/lld bin/lcc bin/lcc1 
 legacy: luna-l1
 .PHONY: clean install
 
