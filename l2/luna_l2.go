@@ -403,7 +403,7 @@ func execute() {
 			// lod <addr (register)> <destination register>	
 			addr := getRegister(uint16(Memory[ProgramCounter+1]))
 			toregister := uint16(Memory[ProgramCounter+2])
-			setRegister(toregister, uint16(Memory[addr]))
+			setRegister(toregister, uint16(Memory[video.Clamp(addr, 0, 65534)]) << 8 | uint16(Memory[video.Clamp(addr + 1, 0, 65534)]))
 			setRegister(0x001a, ProgramCounter + 3)
 			stall(100)
 		case 0x19:
@@ -411,7 +411,8 @@ func execute() {
 			// str <addr (register)> <value (register)>	
 			addr := getRegister(uint16(Memory[ProgramCounter+1]))
 			value := uint16(Memory[ProgramCounter+2])
-			Memory[addr] = byte(getRegister(value))	
+			Memory[video.Clamp(addr, 0, 65534)] = byte(getRegister(value) >> 8)
+			Memory[video.Clamp(addr + 1, 0, 65534)] = byte(getRegister(value) & 0xFF)
 			setRegister(0x001a, ProgramCounter + 3)
 			stall(100)
 		default:
