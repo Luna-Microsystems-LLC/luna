@@ -1,5 +1,5 @@
 ## Documentation
-(Jump to preamble)[#preamble]<br>
+(Jump to preamble)[https://github.com/Luna-Microsystems-LLC/luna/blob/main/Documentation.md#preamble]<br>
 
 ## Preamble
 The Luna L2 is a simple, lightweight, RISC CPU that aims to be clean while also leveraging some luxuries from CISC, with the ultimate end goal of being easy to teach and learn.<br><br>
