@@ -360,11 +360,7 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			if getRegister(uint16(regone)) != 0 && getRegister(uint16(regtwo)) != 0 {
-				setRegister(uint16(toregister), uint16(1))
-			} else {
-				setRegister(uint16(toregister), uint16(0))
-			}
+			setRegister(uint16(toregister), getRegister(uint16(regone)) & getRegister(uint16(regtwo)))	
 			setRegister(0x001a, ProgramCounter + 4)
 			stall(1)
 		case 0x14:
@@ -373,11 +369,7 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			if getRegister(uint16(regone)) != 0 || getRegister(uint16(regtwo)) != 0 {
-				setRegister(uint16(toregister), uint16(1))
-			} else {
-				setRegister(uint16(toregister), uint16(0))
-			}
+			setRegister(uint16(toregister), getRegister(uint16(regone)) | getRegister(uint16(regtwo)))	
 			setRegister(0x001a, ProgramCounter + 4)
 			stall(1)
 		case 0x15:
@@ -386,11 +378,7 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			if getRegister(uint16(regone)) == 0 && getRegister(uint16(regtwo)) == 0 {
-				setRegister(uint16(toregister), uint16(1))
-			} else {
-				setRegister(uint16(toregister), uint16(0))
-			}
+			setRegister(uint16(toregister), ^(getRegister(uint16(regone)) | getRegister(uint16(regtwo))))	
 			setRegister(0x001a, ProgramCounter + 4)
 			stall(3)
 		case 0x16:
@@ -398,11 +386,7 @@ func execute() {
 			// not <register> <register>
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
-			if getRegister(uint16(regone)) != 0 {
-				setRegister(uint16(toregister), uint16(1))
-			} else {
-				setRegister(uint16(toregister), uint16(0))
-			}
+			setRegister(uint16(uint16(toregister)), ^getRegister(uint16(regone)))	
 			setRegister(0x001a, ProgramCounter + 3)
 			stall(1)
 		case 0x17:
@@ -411,11 +395,7 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			if (getRegister(uint16(regone)) == 0 && getRegister(uint16(regtwo)) != 0) || (getRegister(uint16(regone)) != 0 && getRegister(uint16(regtwo)) == 0) {
-				setRegister(uint16(toregister), uint16(1))
-			} else {
-				setRegister(uint16(toregister), uint16(0))
-			}
+			setRegister(uint16(toregister), getRegister(uint16(regone)) ^ getRegister(uint16(regtwo)))	
 			setRegister(0x001a, ProgramCounter + 4)
 			stall(6)
 		case 0x18:
