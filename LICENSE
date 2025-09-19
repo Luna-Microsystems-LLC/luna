@@ -1,15 +1,18 @@
 Luna Microsystems General Purpose License
 =========================================
 
-This work is licensed under the CERN Open Hardware License Version 2 -
-Strongly Reciprocal (CERN-OHL-S v2). See the full text of the CERN-OHL-S v2 at:
-https://gitlab.com/ohwr/project/cernohl/-/wikis/uploads/819d71bea3458f71fba6cf4fb0f2de6b/cern_ohl_s_v2.txt
+Permission Grant
+================
 
-Additional terms (Luna Microsystems General Purpose License)
-============================================================
+Permission is hereby granted, free of charge, to any person obtaining a copy of 
+this work (the "Work") and associated documentation files, to use, copy, modify, 
+and distribute the work, subject to the conditions below.
+
+Conditions
+==========
 
 1. Non-commercial use
-    This work, and any modifications or derivative works, may not be sold, licensed,
+    The Work, and any modifications or derivative works, may not be sold, licensed,
     or otherwise used for commercial purposes without the express written permission
     of Luna Microsystems LLC.
 
@@ -20,7 +23,7 @@ Additional terms (Luna Microsystems General Purpose License)
 
 3. Patent waiver
     No person or entity may file, claim, or enforce any patent or patent application
-    covering this work or any derivative works. By using this work, you agree to
+    covering the Work or any derivative works. By using the Work, you agree to
     permanently waive all patent rights related to it.
 
 Disclaimer
