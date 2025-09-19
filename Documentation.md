@@ -1,6 +1,6 @@
 ## Documentation
 [Jump to preamble](#preamble)<br>
-[Jump to registers](#registers)
+[Jump to registers](#registers)<br>
 [Jump to instructions](#instructions)<br>
 [Jump to interrupts](#interrupts)<br>
 [Jump to assembly](#assembly)<br>
