@@ -52,7 +52,7 @@ func checkBinding(name string) ([]byte, bool) {
 
 func separate(data []byte) {	
 	for i := 0; i < len(data); i++ {
-		if i + 1 < len(data) {
+		if i + 2 < len(data) {
 			bytes := uint32(data[i]) << 16 | uint32(data[i + 1]) << 8 | uint32(data[i + 2])
 			switch bytes {
 			case 0xC2807D:
@@ -69,6 +69,8 @@ func separate(data []byte) {
 			default:
 				write(data[i])
 			}
+		} else {
+			write(data[i])
 		}
 	}	
 }
