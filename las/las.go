@@ -571,6 +571,17 @@ func assemble(text string) {
 			write([]byte{check})
 			write([]byte{one})
 			i = i + 2
+		case "call":
+			label := words[i + 1]
+			assemble(`
+			mov re1, pc
+			mov r0, 20
+			add re1, re1, r0
+			push re1
+			jmp	` + label)
+			i = i + 1
+		case "ret":
+			assemble(`jmp re1`)
 		case ".ascii":	
 			var value string	
 			var tokens = []string {}

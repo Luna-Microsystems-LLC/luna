@@ -84,10 +84,10 @@ func link() {
 				for j < len(data) && data[j] != 0x00 {
 					j++
 				}
-				name := string(data[i + 3:j])
+				name := string(data[i + 3:j])	
 				data = append(data[:i], data[j + 1:]...)
 			
-				location := i + offset
+				location := i + offset 
 				H := byte(location >> 8)	
 				L := byte(location & 0xFF)
 
@@ -96,7 +96,7 @@ func link() {
 					error(2, "`" + name + "'")
 				}
 				bindings = append(bindings, binding{Name: name, Location: []byte{H, L}})	
-			}
+			} 
 		}
 		*buffer = data
 	}
