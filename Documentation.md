@@ -45,7 +45,8 @@ The Luna L2 has 25 unique instructions that allow the CPU to interact with regis
 22. NOT: performs bitwise NOT on two registers and puts the result to a register.<br> 
 23. XOR: performs bitwise XOR on two registers and puts the result to a register.<br>
 24. LOD: loads a word from memory to a register. (bytewise)<br>
-25. STR: stores a value to a memory address from a register. (bytewise)<br><br>
+25. STR: stores a value to a memory address from a register. (bytewise)<br>
+(bytewise: scheme where storing a register value to memory stores the low byte in `address` and the high byte in `address + 1`)
 
 ## Interrupts
 Because the Luna L2 is a primitive CPU, it does not support directly interacting with things like VRAM or input devices from raw instructions. Instead, you must use an interrupt and allow the BIOS to carry out the tasks. (Note: these are for the integrated BIOS, other BIOSes may have different interrupts.)<br><br>
@@ -101,8 +102,8 @@ The flags are as follows:<br>
 `-v`: shows the version of LCC and exits.<br>
 `-s`: do not invoke assembler (`las`) after compilation is complete.<br>
 Supported file types: (subject to change)<br>
-`.s`: assembly
-`.S`: assembly
-`.asm`: assembly
-`.o`: object file
+`.s`: assembly<br>
+`.S`: assembly<br>
+`.asm`: assembly<br>
+`.o`: object file<br>
 `.c`: C (upcoming)
