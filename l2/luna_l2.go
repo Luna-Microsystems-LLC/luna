@@ -3,8 +3,7 @@ package main
 import (	
 	"image"
 	"image/color"	
-	"os"
-	"runtime"
+	"os"	
 	"time"
 	"fmt"	
 
@@ -12,6 +11,7 @@ import (
 	"luna_l2/sound"
 	"luna_l2/video"
 	"luna_l2/keyboard"
+	"luna_l2/types"
 
 	"gioui.org/app"	
 	"gioui.org/f32"
@@ -22,13 +22,8 @@ import (
 	"gioui.org/io/event"	
 )
 
-type Register struct {
-	Address uint16
-	Name    string
-	Value   uint16
-}
-
-var Registers = []Register{
+// Basic elements of CPU
+var Registers = []types.Register {
 	{0x0000, "R0", 0},
 	{0x0001, "R1", 0},
 	{0x0002, "R2", 0},
@@ -62,8 +57,8 @@ var Registers = []Register{
 }
 
 var Memory [65535]byte
-var Ready bool = false
 
+// Register controls
 func setRegister(address uint16, value uint16) {
 	for i := range Registers {
 		if Registers[i].Address == address {
@@ -82,64 +77,20 @@ func getRegister(address uint16) uint16 {
 	return 0x0000
 }
 
+// Wrappers for outside modules
+func SetRegister(address uint16, value uint16) {
+	setRegister(address, value)
+}
+
+func GetRegister(address uint16) uint16 {
+	return getRegister(address)
+}
+
+// CPU code
 func stall(cycles int) {
 	clockHz := 1158000
 	cycleTime := int(time.Second) / clockHz
 	time.Sleep(time.Duration(cycleTime * cycles))
-}
-
-func intHandler(code uint16) {
-	if code == 0x01 {
-		// BIOS print to screen
-		// start address in R1
-		// Foreground in R2
-		// Background in R3
-		char := getRegister(0x0001)
-		bios.WriteChar(string(rune(char)), uint8(getRegister(0x0002)), uint8(getRegister(0x0003)))
-	} else if code == 0x02 {
-		// BIOS sleep
-		// seconds in R1
-		timeToSleep := getRegister(0x0001)
-		time.Sleep(time.Second * time.Duration(timeToSleep))
-	} else if code == 0x03 {
-		// BIOS write to VRAM
-		// address in R1, word in R2
-		address := getRegister(0x0001)
-		word := getRegister(0x0002)
-		video.MemoryVideo[video.Clamp(address, 0, 63999)] = byte(uint16(word) << 8)
-		video.MemoryVideo[video.Clamp(address + 1, 0, 63999)] = byte(uint16(word) & 0xFF)
-	} else if code == 0x4 {
-		// BIOS configure input mode
-		// Mode 1: no type output
-		// Mode 2: type output
-		// In R1
-		if getRegister(0x0001) == uint16(1) {
-			bios.TypeOut = true
-		} else {
-			bios.TypeOut = false
-		}
-	} else if code == 0x5 {
-		// BIOS configure type out
-		// Mode in R1
-		if bios.TypeOut == true {
-			bios.WriteChar(string(rune(getRegister(0x001b))), uint8(255), uint8(0))	
-		}
-		if bios.KeyTrap == true {
-			bios.KeyTrap = false
-			setRegister(uint16(0x0001), getRegister(0x001b))
-		}
-	} else if code == 0x6 {
-		// BIOS wait for key
-		// Return in R1 via interrupt 5
-		bios.KeyTrap = true
-		for {
-			if bios.KeyTrap == true {
-				time.Sleep(500)
-			} else {
-				break
-			}
-		}
-	} 
 }
 
 func execute() {
@@ -198,7 +149,7 @@ func execute() {
 		case 0x04:
 			// INT
 			code := uint16(Memory[ProgramCounter+1])<<8 | uint16(Memory[ProgramCounter+2])
-			intHandler(code)
+			bios.IntHandler(code)
 			setRegister(0x001a, ProgramCounter+3)
 			stall(34)
 		case 0x05:
@@ -439,6 +390,8 @@ func execute() {
 	}
 }
 
+// Frontend code
+var Ready bool = false
 func WindowManage(window *app.Window) error {
 	var ops op.Ops
 	img := image.NewRGBA(image.Rect(0, 0, 320, 200))
@@ -499,7 +452,7 @@ func WindowManage(window *app.Window) error {
 						}
 	
     					setRegister(0x001b, uint16(rune(char[0])))
-    					intHandler(0x05)
+    					bios.IntHandler(0x05)
 					}
 				}
 			}
@@ -550,6 +503,8 @@ func InitializeWindow() {
 }
 
 func main() {
+	bios.Registers = &Registers
+	bios.Memory = &Memory
 	go func() {
 		if Ready == false {	
 			for {
@@ -561,11 +516,7 @@ func main() {
 			}
 		}
 
-		bios.WriteLine("Luna L2", 255, 0)
-		bios.WriteLine("BIOS: Integrated BIOS", 255, 0)
-		bios.WriteLine("Host: " + runtime.GOOS, 255, 0)
-		bios.WriteLine("Host CPU: " + runtime.GOARCH, 255, 0)
-		bios.WriteLine("Copyright (c) 2025 Luna Microsystems LLC\n", 255, 0)
+		bios.Splash()	
 
 		if len(os.Args) < 2 {
 			bios.WriteLine("FATAL: Disk image not found", 255, 0)
@@ -577,7 +528,7 @@ func main() {
 
 		data, err := os.ReadFile(filename)
 		if err != nil {
-			bios.WriteLine("FATAL: Failed to read disk image '"+filename+"'", 255, 0)
+			bios.WriteLine("FATAL: Failed to read disk image '" + filename + "'", 255, 0)
 			sound.PlaySoundROM("crash")
 			return
 		}
@@ -587,12 +538,12 @@ func main() {
 			sound.PlaySoundROM("crash")
 			return
 		}
-		copy(Memory[:], data)
-		if Memory[0x0000] != 0x4C || Memory[0x0001] != 0x32 || Memory[0x0002] != 0x45 {
-			bios.WriteLine("FATAL: Invalid disk image", 255, 0)
-			sound.PlaySoundROM("crash")
-			return
+
+		if bios.CheckImage() == false {
+			
 		}
+
+		copy(Memory[:], data)	
 		setRegister(0x0019, uint16(len(data)))
 		execute()
 	}()	
