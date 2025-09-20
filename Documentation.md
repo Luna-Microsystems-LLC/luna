@@ -55,7 +55,8 @@ Because the Luna L2 is a primitive CPU, it does not support directly interacting
 2. Sleep (seconds in r1)<br>
 3. Write to VRAM (bytewise) (address in r1, value in r2)<br>
 4. Toggle keyboard echo (mode in r1, 1 for echo char back, 0 for no echo)<br>
-5. Reserved; do not use<br><br>
+5. Reserved; do not use<br>
+6. Wait for key via interrupt 5 (blocking) (return in r1)<br><br>
 
 ## Assembly
 The L2 architecture has a custom assembler (`las`) to convert programs from assembly language (.asm, .s, .S) to machine code (.o) that can then be linked and then run on L2.<br>

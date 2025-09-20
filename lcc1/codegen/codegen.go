@@ -4,11 +4,11 @@ import (
 	"lcc1/parser"
 )
 
-func Codegen(AST []parser.Node) string {
-	var code string = ""
+var Code string = ""
 
+func Codegen(AST []parser.Node) {	
 	write := func(text string) {
-		code = code + text + "\n"
+		Code = Code + text + "\n"
 	}
 
 	for i := 0; i < len(AST); i++ {
@@ -18,10 +18,8 @@ func Codegen(AST []parser.Node) string {
 			fname := node.Value
 			write(fname + ":\n")
 			for _, child_node := range node.Children {
-				Codegen(child_node)
+				Codegen([]parser.Node{child_node})
 			}
 		}	
 	}
-
-	return code
 }

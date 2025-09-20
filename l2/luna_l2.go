@@ -106,7 +106,6 @@ func intHandler(code uint16) {
 		// address in R1, word in R2
 		address := getRegister(0x0001)
 		word := getRegister(0x0002)
-
 		video.MemoryVideo[video.Clamp(address, 0, 63999)] = byte(uint16(word) << 8)
 		video.MemoryVideo[video.Clamp(address + 1, 0, 63999)] = byte(uint16(word) & 0xFF)
 	} else if code == 0x4 {
@@ -120,10 +119,27 @@ func intHandler(code uint16) {
 			bios.TypeOut = false
 		}
 	} else if code == 0x5 {
+		// BIOS configure type out
+		// Mode in R1
 		if bios.TypeOut == true {
-			bios.WriteChar(string(rune(getRegister(0x001b))), uint8(255), uint8(0))
+			bios.WriteChar(string(rune(getRegister(0x001b))), uint8(255), uint8(0))	
 		}
-	}
+		if bios.KeyTrap == true {
+			bios.KeyTrap = false
+			setRegister(uint16(0x0001), getRegister(0x001b))
+		}
+	} else if code == 0x6 {
+		// BIOS wait for key
+		// Return in R1 via interrupt 5
+		bios.KeyTrap = true
+		for {
+			if bios.KeyTrap == true {
+				time.Sleep(500)
+			} else {
+				break
+			}
+		}
+	} 
 }
 
 func execute() {
@@ -417,7 +433,7 @@ func execute() {
 			stall(100)
 		default:
 			bios.WriteString("FATAL: Illegal instruction " + fmt.Sprintf("%X", uint16(op)) + " at location " + fmt.Sprintf("%X", getRegister(0x001a)), 255, 0)
-			sound.PlaySound("crash")
+			sound.PlaySoundROM("crash")
 			return
 		}
 	}
@@ -553,7 +569,7 @@ func main() {
 
 		if len(os.Args) < 2 {
 			bios.WriteLine("FATAL: Disk image not found", 255, 0)
-			sound.PlaySound("crash")
+			sound.PlaySoundROM("crash")
 			return
 		} 
 
@@ -562,19 +578,19 @@ func main() {
 		data, err := os.ReadFile(filename)
 		if err != nil {
 			bios.WriteLine("FATAL: Failed to read disk image '"+filename+"'", 255, 0)
-			sound.PlaySound("crash")
+			sound.PlaySoundROM("crash")
 			return
 		}
 
 		if len(data) > 65535 {
 			bios.WriteLine("FATAL: Disk image too large (max 64KiB)", 255, 0)
-			sound.PlaySound("crash")
+			sound.PlaySoundROM("crash")
 			return
 		}
 		copy(Memory[:], data)
 		if Memory[0x0000] != 0x4C || Memory[0x0001] != 0x32 || Memory[0x0002] != 0x45 {
 			bios.WriteLine("FATAL: Invalid disk image", 255, 0)
-			sound.PlaySound("crash")
+			sound.PlaySoundROM("crash")
 			return
 		}
 		setRegister(0x0019, uint16(len(data)))

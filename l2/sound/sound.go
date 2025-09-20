@@ -9,10 +9,17 @@ import (
 	"time"
 )
 
+type MemoryStreamer struct {
+	Samples []float64
+	Position int
+}
+
 //go:embed crash.mp3
 var crashSoundData []byte
 
-func PlaySound(soundName string) {
+var MemoryAudio [44100]byte
+
+func PlaySoundROM(soundName string) {
 	if soundName == "crash" {
 		streamer, format, err := mp3.Decode(io.NopCloser(bytes.NewReader(crashSoundData)))
 		if err != nil {
@@ -25,3 +32,4 @@ func PlaySound(soundName string) {
 		speaker.Play(beep.Seq(streamer, beep.Callback(func() {})))	
 	}
 }
+

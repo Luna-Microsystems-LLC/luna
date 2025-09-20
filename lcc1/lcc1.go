@@ -37,7 +37,7 @@ func main() {
 		parser.Parse_entry(tokens)
 	}
 
-	code := codegen.Codegen(parser.AbstractSyntaxTree)
+	codegen.Codegen(parser.AbstractSyntaxTree)
 
-	print(code)
+	print(codegen.Code)
 }
