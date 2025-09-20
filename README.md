@@ -9,16 +9,16 @@ A simple, lightweight RISC CPU architecture.<br><br>
 # Manual Installation (MacOS, Linux, FreeBSD)<br>
 - Clone the repository using `git clone`<br>
 - Navigate into the directory<br>
-- Run `make; make install` to install the Luna L2 virtual machine, the Luna Compiler collection (`lcc`), and the Luna linker (`lld`)<br>
-- Run `luna-l2 <disk image>` to run an application.<br>
-- Note: if you would like to install the legacy Luna L1 architecture, run `make legacy` to install it as well as the assembler and C compiler. Then run `luna-l1 <disk image>` to run an application.<br>
+- Run `make; make install` to install the Luna L2 emulator and toolchain<br>
+- Run `luna-l2 <disk image>` to run an application<br>
+- Note: if you would like to install the legacy Luna L1 emulator and toolchain, run `make legacy` to install it as well as the assembler and C compiler. Then run `luna-l1 <disk image>` to run an application<br>
 
 # Manual Installation (Windows)<br>
-- Download the Luna repository as a .zip file and then unzip it.<br>
-- Open Command Prompt or PowerShell and navigate into the unzipped directory.<br>
-- Navigate into the `l2` directory<br>
-- Run `go build -o luna-l2 luna_l2.go`<br>
-- Repeat as necessary for the assembler, linker, and frontend `lcc`.<br><br>
+- Clone the repository using `git clone` or download it as a ZIP and then unzip it<br>
+- Open the directory<br>
+- Run the `build_windows.bat` file to build the Luna L2 emulator and toolchain<br>
+- Install the applications into your PATH variable<br>
+- Run `luna-l2 <disk image>` to run an application<br>
 
 # Running an application<br>
 - Run `luna-l2 <disk image>` to run an application.<br>
