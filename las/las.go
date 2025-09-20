@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"os/exec"
 	"path/filepath"
+	"unicode"
 )
 
 var section string = "text"
@@ -141,8 +142,8 @@ func error(errno int, args string) {
 
 func parse(text string) []byte {
 	// Check for number
-	if _, err := strconv.Atoi(text); err == nil {
-		num, _ := strconv.Atoi(text)
+	if _, err := strconv.ParseInt(text, 0, 64); err == nil {
+		num, _ := strconv.ParseInt(text, 0, 64)
 
 		high := byte(num >> 8)
 		low := byte(num & 0xFF)
@@ -179,11 +180,53 @@ func formatString(text string) string {
 	return text
 }
 
+func Lex(text string) []string {
+	var tokens = []string {}
+	var buf = []rune {}
+
+	for _, r := range text {
+		switch {
+		case r == '\n':	
+			if len(buf) > 0 {
+				tokens = append(tokens, string(buf))
+				buf = buf[:0]
+			}
+			tokens = append(tokens, "\n")
+		case unicode.IsSpace(r):
+			if len(buf) > 0 {
+				tokens = append(tokens, string(buf))
+				buf = buf[:0]
+			}
+		default:
+			buf = append(buf, r)
+		}
+	}
+
+	if len(buf) > 0 {
+		tokens = append(tokens, string(buf))
+	}
+
+	return tokens
+}
+
 func assemble(text string) {
-	words := strings.Fields(text)
+	words := Lex(text)
 
 	for i := 0; i < len(words); i++ {
 		words[i] = strings.TrimSuffix(words[i], ",")
+	}
+
+	for i := 0; i < len(words); i++ {
+		if words[i] == "#define" {
+			alias := words[i + 1]
+			actual := words[i + 2]
+			words = append(words[:i], words[i + 3:]...)
+			for j := 0; j < len(words); j++ {
+				if words[j] == alias {
+					words[j] = actual
+				}
+			}	
+		}
 	}
 
 	for i := 0; i < len(words); i++ {
@@ -216,6 +259,15 @@ func assemble(text string) {
 			section = "text"
 		case ".edata":
 			section = "edata"
+		case "#", "//", ";":
+			for j := i + 1; j < len(words); j++ {
+				if words[j] == "\n" {
+					i = j
+					break
+				}
+			}
+		case "\n":
+			continue
 		case "mov":
 			write([]byte{0x01})
 
