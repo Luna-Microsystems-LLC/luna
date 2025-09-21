@@ -5,12 +5,13 @@ import (
 	"luna_l2/sound"
 	"time"
 	"runtime"
+	"os"
 )
 
 var TypeOut bool = false
 var KeyTrap bool = false
 var Registers *[]types.Register
-var Memory *[]byte
+var Memory *[65535]byte
 
 func WriteChar(char string, fg uint8, bg uint8) {
 	video.PrintChar(rune(char[0]), byte(fg), byte(bg))
@@ -109,7 +110,16 @@ func Splash() {
 func CheckImage() bool {
 	if (*Memory)[0x0000] != 0x4C || (*Memory)[0x0001] != 0x32 || (*Memory)[0x0002] != 0x45 {
 		WriteLine("FATAL: Invalid disk image", 255, 0)
-		sound.PlaySoundROM("crash")
+		go sound.PlaySoundROM("crash")
+		return false
+	}
+	return true
+}
+
+func CheckArgs() bool {
+	if len(os.Args) < 2 {
+		WriteLine("FATAL: No boot device", 255, 0)
+		go sound.PlaySoundROM("crash")
 		return false
 	}
 	return true

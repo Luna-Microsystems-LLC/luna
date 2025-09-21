@@ -516,13 +516,11 @@ func main() {
 			}
 		}
 
-		bios.Splash()	
+		bios.Splash()
 
-		if len(os.Args) < 2 {
-			bios.WriteLine("FATAL: Disk image not found", 255, 0)
-			sound.PlaySoundROM("crash")
+		if bios.CheckArgs() == false {
 			return
-		} 
+		}
 
 		filename := os.Args[1]
 
@@ -540,7 +538,7 @@ func main() {
 		}
 
 		if bios.CheckImage() == false {
-			
+			return	
 		}
 
 		copy(Memory[:], data)	
