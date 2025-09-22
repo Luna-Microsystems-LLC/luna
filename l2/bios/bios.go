@@ -1,11 +1,10 @@
 package bios
 import (
 	"luna_l2/video"
-	"luna_l2/types"
-	"luna_l2/sound"
-	"time"
-	"runtime"
+	"luna_l2/types"	
+	"time"	
 	"os"
+	"fmt"
 )
 
 var TypeOut bool = false
@@ -96,21 +95,21 @@ func IntHandler(code uint16) {
 				break
 			}
 		}
-	} 
+	} else if code == 0x7 {
+		WriteLine("Illegal instruction 0x" + fmt.Sprintf("%04x", getRegister(0x0001)) + " at location 0x" + fmt.Sprintf("%04x", getRegister(0x001a)), 255, 0)
+		return
+	}
 }
 
 func Splash() {
 	WriteLine("Luna L2", 255, 0)
-	WriteLine("BIOS: Integrated BIOS", 255, 0)
-	WriteLine("Host: " + runtime.GOOS, 255, 0)
-	WriteLine("Host CPU: " + runtime.GOARCH, 255, 0)
+	WriteLine("BIOS: Integrated BIOS", 255, 0)	
 	WriteLine("Copyright (c) 2025 Luna Microsystems LLC\n", 255, 0)
 }
 
 func CheckImage() bool {
 	if (*Memory)[0x0000] != 0x4C || (*Memory)[0x0001] != 0x32 || (*Memory)[0x0002] != 0x45 {
-		WriteLine("FATAL: Invalid disk image", 255, 0)
-		go sound.PlaySoundROM("crash")
+		WriteLine("Invalid disk image", 255, 0)	
 		return false
 	}
 	return true
@@ -118,8 +117,7 @@ func CheckImage() bool {
 
 func CheckArgs() bool {
 	if len(os.Args) < 2 {
-		WriteLine("FATAL: No boot device", 255, 0)
-		go sound.PlaySoundROM("crash")
+		WriteLine("No bootable device", 255, 0)
 		return false
 	}
 	return true

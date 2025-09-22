@@ -623,6 +623,19 @@ func assemble(text string) {
 			write([]byte{check})
 			write([]byte{one})
 			i = i + 2
+		case "lodw":
+			check := isRegister(words[i+1])
+			one := isRegister(words[i+2])
+			if check == 0xff {
+				error(2, "'"+words[i+1]+"'")
+			}
+			if one == 0xff {
+				error(2, "'"+words[i+2]+"'")
+			}
+			write([]byte{0x20})
+			write([]byte{check})
+			write([]byte{one})
+			i = i + 2
 		case "call":
 			label := words[i + 1]
 			assemble(`
