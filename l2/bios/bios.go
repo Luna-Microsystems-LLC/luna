@@ -62,7 +62,7 @@ func IntHandler(code uint16) {
 		// address in R1, word in R2
 		address := getRegister(0x0001)
 		word := getRegister(0x0002)
-		video.MemoryVideo[video.Clamp(address, 0, 63999)] = byte(uint16(word) << 8)
+		video.MemoryVideo[video.Clamp(address, 0, 63999)] = byte(uint16(word) >> 8)
 		video.MemoryVideo[video.Clamp(address + 1, 0, 63999)] = byte(uint16(word) & 0xFF)
 	} else if code == 0x4 {
 		// BIOS configure input mode

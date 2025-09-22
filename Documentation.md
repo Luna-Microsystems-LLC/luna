@@ -19,7 +19,7 @@ PC: program counter/instruction pointer<br>
 RE1-RE3: reserved registers (you may use RE3 for storing PC when using loops)<br><br>
 
 ## Instructions
-The Luna L2 has 25 unique instructions that allow the CPU to interact with registers, memory, and the BIOS<br><br>
+The Luna L2 has 26 unique instructions that allow the CPU to interact with registers, memory, and the BIOS<br><br>
 
 1. MOV: moves a value from the source to the destination; source can be register or immediate.<br>
 2. HLT: stops the CPU from executing instructions.<br>
@@ -44,9 +44,10 @@ The Luna L2 has 25 unique instructions that allow the CPU to interact with regis
 21. NOR:  performs bitwise NOR on two registers and puts the result to a register.<br>
 22. NOT: performs bitwise NOT on two registers and puts the result to a register.<br> 
 23. XOR: performs bitwise XOR on two registers and puts the result to a register.<br>
-24. LOD: loads a word from memory to a register. (bytewise)<br>
+24. LOD: loads a byte from memory to a register.<br>
 25. STR: stores a value to a memory address from a register. (bytewise)<br>
-(bytewise: scheme where storing a register value to memory stores the low byte in `address` and the high byte in `address + 1`)
+(bytewise: scheme where storing a register value to memory stores the low byte in `address` and the high byte in `address + 1`)<br>
+26. LODW: loads a word from memory to a register. (bytewise)<br><br>
 
 ## Interrupts
 Because the Luna L2 is a primitive CPU, it does not support directly interacting with things like VRAM or input devices from raw instructions. Instead, you must use an interrupt and allow the BIOS to carry out the tasks. (Note: these are for the integrated BIOS, other BIOSes may have different interrupts.)<br><br>
