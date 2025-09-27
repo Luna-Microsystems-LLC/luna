@@ -22,6 +22,13 @@ const (
 	TokLBrack
 	TokRBrack
 	TokEOF
+	TokSemi
+	TokPlus
+	TokMinus
+	TokStar
+	TokSlash
+	TokEqual
+	TokComma
 )
 
 type Token struct {
@@ -55,7 +62,7 @@ func Lex(code string) []Token {
 			tokens = append(tokens, Token{Type: TokIf, Value: content})
 		} else if content == "else" {
 			tokens = append(tokens, Token{Type: TokElse, Value: content})
-		} else if _, err := strconv.Atoi(content); err == nil {
+		} else if _, err := strconv.ParseInt(content, 0, 64); err == nil {
 			tokens = append(tokens, Token{Type: TokNumber, Value: content})
 		} else if content == "(" {
 			tokens = append(tokens, Token{Type: TokLParen, Value: content})
@@ -65,6 +72,20 @@ func Lex(code string) []Token {
 			tokens = append(tokens, Token{Type: TokLCurly, Value: content})
 		} else if content == "}" {
 			tokens = append(tokens, Token{Type: TokRCurly, Value: content})
+		} else if content == ";" {
+			tokens = append(tokens, Token{Type: TokSemi, Value: content})
+		} else if content == "+" {
+			tokens = append(tokens, Token{Type: TokPlus, Value: content})
+		} else if content == "-" {
+			tokens = append(tokens, Token{Type: TokMinus, Value: content})
+		} else if content == "*" {
+			tokens = append(tokens, Token{Type: TokStar, Value: content})
+		} else if content == "/" {
+			tokens = append(tokens, Token{Type: TokSlash, Value: content})
+		} else if content == "=" {
+			tokens = append(tokens, Token{Type: TokEqual, Value: content})
+		} else if content == "," {
+			tokens = append(tokens, Token{Type: TokComma, Value: content})
 		} else {
 			tokens = append(tokens, Token{Type: TokIdent, Value: content})
 		} 

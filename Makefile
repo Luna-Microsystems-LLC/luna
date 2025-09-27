@@ -31,18 +31,19 @@ bin/lcc: $(SRC)/lcc/*
 	cd lcc && go build -o ../bin/lcc ./lcc.go
 
 bin/l2ld: $(SRC)/l2ld/*
+	mkdir -p /usr/local/lib/lcc
 	cd l2ld && go build -o ../bin/l2ld ./l2ld.go
 
 install:
-	sudo cp bin/* /usr/local/bin/
+	cp bin/* /usr/local/bin/
 
 clean:
-	sudo rm -rf /usr/local/bin/lvm
-	sudo rm -f /usr/local/bin/luna-l1
-	sudo rm -f /usr/local/bin/lasm-l1
-	sudo rm -f /usr/local/bin/lcc-l1
-	sudo rm -f /usr/local/bin/luna-l2
-	sudo rm -f /usr/local/bin/las
-	sudo rm -f /usr/local/bin/lcc1
-	sudo rm -f /usr/local/bin/lcc
-	sudo rm -f /usr/local/bin/lld
+	rm -rf /usr/local/bin/lvm
+	rm -f /usr/local/bin/luna-l1
+	rm -f /usr/local/bin/lasm-l1
+	rm -f /usr/local/bin/lcc-l1
+	rm -f /usr/local/bin/luna-l2
+	rm -f /usr/local/bin/las
+	rm -f /usr/local/bin/lcc1
+	rm -f /usr/local/bin/lcc
+	rm -f /usr/local/bin/lld

@@ -3,9 +3,9 @@ package main
 import (	
 	"lcc1/lexer"
 	"lcc1/parser"
-	"lcc1/error"
-	"lcc1/codegen"
+	"lcc1/error"	
 	"os"
+	"fmt"
 )
 
 func main() {
@@ -15,17 +15,25 @@ func main() {
 	}
 
 	var input_files = []string {}
-	// var output_file string = ""
+	var output_file string = ""
 
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
 		switch arg {
 		case "-o":
-			// output_file = os.Args[i + 1]
+			output_file = os.Args[i + 1]
 			i++
+		case "-v":
+			fmt.Println("Luna Compiler Collection version 2.0")
+			fmt.Println("Target: luna-l2")
+			os.Exit(0)
 		default:
 			input_files = append(input_files, arg)
 		}
+	}
+
+	if output_file == "" {
+		output_file = "a.s"
 	}
 
 	for _, file := range input_files {
@@ -34,10 +42,8 @@ func main() {
 			os.Exit(1)
 		}
 		tokens := lexer.Lex(string(data))
-		parser.Parse_entry(tokens)
+		parser.Parse(tokens)
 	}
 
-	codegen.Codegen(parser.AbstractSyntaxTree)
-
-	print(codegen.Code)
+	os.WriteFile(output_file, []byte(".text\n" + parser.Code1 + "\n" + parser.Code2), 0644)
 }

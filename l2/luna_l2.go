@@ -7,6 +7,7 @@ import (
 	"time"
 	"fmt"
 	"strconv"
+	"bufio"
 
 	"luna_l2/bios"		
 	"luna_l2/video"
@@ -89,6 +90,7 @@ func getRegisterName[T uint16 | byte](address T) string {
 
 // Meta-code
 var LogOn bool = false
+var Debug bool = false
 var ClockSpeed int64 = 1158000
 func Log(text string) {
 	if LogOn == true {
@@ -222,12 +224,12 @@ func execute() {
 			if mode == 0x01 {
 				loc = uint16(Memory[ProgramCounter+3])<<8 | uint16(Memory[ProgramCounter+4])
 				not = ProgramCounter + 5
-				Log("jnz " + getRegisterName(checkRegister) + ", " + fmt.Sprintf("0x%04x", loc))
+				Log("jz " + getRegisterName(checkRegister) + ", " + fmt.Sprintf("0x%04x", loc))
 			} else if mode == 0x02 {
 				frm := uint16(Memory[ProgramCounter+3])
 				loc = getRegister(frm)
 				not = ProgramCounter + 4
-				Log("jnz " + getRegisterName(checkRegister) + ", " + getRegisterName(frm))
+				Log("jz " + getRegisterName(checkRegister) + ", " + getRegisterName(frm))
 			}
 
 			if getRegister(uint16(checkRegister)) == 0 {
@@ -431,8 +433,17 @@ func execute() {
 			stall(100)
 		default:
 			setRegister(0x0001, uint16(op))
+			Log("\033[31mIllegal instruction 0x" + fmt.Sprintf("%04x", uint16(op)) + "\033[33m")
 			bios.IntHandler(0x7)	
-			return
+			if Debug == true {
+				setRegister(0x001a, ProgramCounter + 1)
+			} else {
+				return
+			}
+		}
+
+		if Debug == true {
+			bufio.NewReader(os.Stdin).ReadBytes('\n')
 		}
 	}
 }
@@ -498,7 +509,7 @@ func WindowManage(window *app.Window) error {
 						}
 	
     					setRegister(0x001b, uint16(rune(char[0])))
-    					bios.IntHandler(0x05)
+    					bios.IntHandler(bios.KeyInterruptCode)
 					}
 				}
 			}
@@ -528,6 +539,7 @@ func WindowManage(window *app.Window) error {
 			paint.PaintOp{}.Add(GTX.Ops)	
 			E.Frame(GTX.Ops)
 			Ready = true
+			time.Sleep(time.Duration(150))
 			window.Invalidate()
 		}
 	}
@@ -584,6 +596,9 @@ func main() {
 				ClockSpeed = int64(speed)
 				i++
 			case "--log":
+				LogOn = true
+			case "--debug":
+				Debug = true
 				LogOn = true
 			default:
 				filename = arg

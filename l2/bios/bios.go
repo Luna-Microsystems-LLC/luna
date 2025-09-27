@@ -11,6 +11,7 @@ var TypeOut bool = false
 var KeyTrap bool = false
 var Registers *[]types.Register
 var Memory *[65535]byte
+var KeyInterruptCode uint16 = 0x5
 
 func WriteChar(char string, fg uint8, bg uint8) {
 	video.PrintChar(rune(char[0]), byte(fg), byte(bg))
@@ -75,8 +76,7 @@ func IntHandler(code uint16) {
 			TypeOut = false
 		}
 	} else if code == 0x5 {
-		// BIOS configure type out
-		// Mode in R1
+		// BIOS key event	
 		if TypeOut == true {
 			WriteChar(string(rune(getRegister(0x001b))), uint8(255), uint8(0))	
 		}

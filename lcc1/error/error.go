@@ -9,6 +9,8 @@ var errors = []string {
 	"no input files",
 	"unexpected token",
 	"expected",
+	"redefinition of",
+	"use of undeclared identifier",
 }
 
 var Warnings int = 0

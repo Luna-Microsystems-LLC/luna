@@ -16,6 +16,7 @@ var DataBuffer []byte
 var TextBuffer []byte
 var ExtendedDataBuffer []byte
 var section string = "text"
+var libs = map[string]string {}
 
 var bindings = []binding {}
 
@@ -24,6 +25,7 @@ var errors = []string {
 	"file cannot be open()ed, errno=2",
 	"multiple definitions of",
 	"Undefined symbol for architecture luna-l2:",
+	"unable to load list of libraries",
 }
 func error(errno int, args string) {
 	fmt.Println("l2ld: " + errors[errno] + " " + args)
@@ -75,8 +77,8 @@ func separate(data []byte) {
 	}	
 }
 
-func link() {
-	collect := func(buffer *[]byte, offset int) {
+func link() {	
+	collect := func(buffer *[]byte, offset int) {	
 		data := *buffer
 		for i := 0; i < len(data); i++ {
 			if bytes.HasPrefix(data[i:], []byte("LD_")) {
@@ -84,18 +86,25 @@ func link() {
 				for j < len(data) && data[j] != 0x00 {
 					j++
 				}
-				name := string(data[i + 3:j])	
+				name := string(data[i + 3:j])
+
+				old := len(data)
 				data = append(data[:i], data[j + 1:]...)
-			
-				location := i + offset 
+				RSF := old - len(data)
+
+				location := (i + offset) 
 				H := byte(location >> 8)	
 				L := byte(location & 0xFF)
+
+				AH := byte((location - (j - i + 3) - RSF) >> 8)
+				AL := byte((location - (j - i + 3) - RSF) & 0xFF)
 
 				_, ok := checkBinding(name)
 				if ok != false {
 					error(2, "`" + name + "'")
 				}
-				bindings = append(bindings, binding{Name: name, Location: []byte{H, L}})	
+				bindings = append(bindings, binding{Name: name, Location: []byte{H, L}})
+				data = append(bytes.ReplaceAll(data[:i], append([]byte("LR_" + name), 0x00), []byte{AH, AL}), data[i:]...)
 			} 
 		}
 		*buffer = data
@@ -112,11 +121,29 @@ func link() {
 	}
 }
 
+func collectLibs() {
+	content, err := os.ReadFile("/usr/local/lib/lcc/libs.conf")
+	if err != nil {
+		error(4, "")
+		return
+	}
+	content_str := string(content)
+
+	words := strings.Fields(content_str)
+	for i := 0; i < len(words); i++ {
+		word := words[i]
+		nextword := words[i + 1]
+		libs[word] = nextword
+		i++
+	}	
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		error(0, "")
 	}
 
+	collectLibs()
 	var input_files []string
 	var output_filename string = ""
 
@@ -131,7 +158,7 @@ func main() {
 			os.Exit(0)
 		case "-o":
 			output_filename = os.Args[i + 1]
-			i++	
+			i++
 		default:
 			input_files = append(input_files, arg)
 		}
@@ -141,6 +168,7 @@ func main() {
 		output_filename = "a.bin"
 	}
 
+beginning:
 	for _, file := range input_files {
 		data, err := os.ReadFile(file)
 		if err != nil {
@@ -173,7 +201,20 @@ func main() {
 			}
 		}
 		name = strings.TrimPrefix(name, "LR_")
-		error(3, "\n  \"" + name + "\", referenced from\n    <initial-undefines>")
+
+		if libs[name] != "" {
+			input_files = append(input_files, libs[name])
+
+			// Reset
+			DataBuffer = []byte {}
+			TextBuffer = []byte {}
+			ExtendedDataBuffer = []byte {}
+			bindings = []binding {}
+			section = "text"
+			goto beginning
+		} else {
+			error(3, "\n  \"" + name + "\", referenced from\n    <initial-undefines>")
+		}
 	}
 	os.WriteFile(output_filename, []byte(buffer), 0644)
 }

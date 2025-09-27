@@ -108,8 +108,15 @@ func main() {
 	for _, file := range input_files {
 		// name := filepath.Base(file) // add when we make the C compiler
 		ext := filepath.Ext(file)
+		name, _ := splitFile(file)
 
 		switch ext {
+		case ".c":
+			success := execute("lcc1 " + file + " -o " + name + ".s", false)
+			if success != true {
+				continue
+			}
+			assembly_files = append(assembly_files, name + ".s")
 		case ".s":
 			assembly_files = append(assembly_files, file)	
 		case ".asm":
