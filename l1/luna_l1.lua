@@ -1,9 +1,6 @@
-if os.getenv("OS") ~= "Windows_NT" then
-    io.write("\27]0;Luna VM Runtime\7")
-    io.flush()
-else
-    os.execute("title \"Luna VM Runtime\"")
-end
+print("Luna L1")
+print("BIOS: Integrated BIOS")
+print("Copyright (c) 2025 Luna Microsystems LLC")
 
 -- Variables
 local execute

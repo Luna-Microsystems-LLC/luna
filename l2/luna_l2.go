@@ -57,19 +57,26 @@ var Registers = []types.Register {
 	{0x001d, "RE3", 0},
 }
 
-var Memory [65535]byte
+var Memory [0x70000000]byte
+const (
+	MEMSIZE uint32 = 0x70000000
+	MEMCAP uint32 = 0x6FFFFFFF
+)
 
 // Register controls
-func setRegister(address uint16, value uint16) {
+func setRegister(address uint32, value uint32) {
 	for i := range Registers {
 		if Registers[i].Address == address {
-			Registers[i].Value = value
-			return
+			if types.Bits32 == false {
+				Registers[i].Value = uint32(uint16(value))
+			} else {
+				Registers[i].Value = value
+			}
 		}
 	}
 }
 
-func getRegister(address uint16) uint16 {
+func getRegister(address uint32) uint32 {
 	for _, register := range Registers {
 		if register.Address == address {
 			return register.Value
@@ -78,8 +85,8 @@ func getRegister(address uint16) uint16 {
 	return 0x0000
 }
 
-func getRegisterName[T uint16 | byte](address T) string {
-	addr := uint16(address)
+func getRegisterName[T uint32 | byte](address T) string {
+	addr := uint32(address)
 	for _, register := range Registers {
 		if register.Address == addr {
 			return register.Name
@@ -88,13 +95,54 @@ func getRegisterName[T uint16 | byte](address T) string {
 	return ""
 }
 
+func Mapper(address uint32) byte {
+	if address < MEMSIZE {
+		return Memory[address]
+	} else {
+		return Memory[MEMCAP]
+	}
+	return Memory[0x00000000]
+}
+
+func MapperIndex(address uint32) uint32 {
+	if address < MEMSIZE {
+		return address
+	} else {
+		return MEMCAP
+	}
+	return 0x00000000	
+}
+
 // Meta-code
 var LogOn bool = false
 var Debug bool = false
 var ClockSpeed int64 = 1158000
+var Filename string = ""
 func Log(text string) {
 	if LogOn == true {
-		fmt.Println("\033[33m" + fmt.Sprintf("0x%04x: ", getRegister(0x001a)) + text + "\033[0m")
+		fmt.Println("\033[33m" + fmt.Sprintf("0x%08x: ", getRegister(0x001a)) + text + "\033[0m")
+	}
+}
+func LoadSector(sector int, enforce bool) {
+	data, err := os.ReadFile(Filename)
+	if err != nil {
+		if enforce == false {
+			fmt.Println("luna-l2: could not reload block device")
+			return
+		} else {
+			fmt.Println("luna-l2: could not open '" + Filename + "'")
+			os.Exit(1)
+		}
+	}
+	start := sector * 512
+	if start > len(data) {
+		Log("read at address " + fmt.Sprintf("0x%08x", start) + " out of bounds")	
+		return
+	}
+	if start + 512 > len(data) {
+		copy(Memory[start:start + 512], data[start:])
+	} else {
+		copy(Memory[start:start + 512], data[start:start + 512])
 	}
 }
 
@@ -107,14 +155,10 @@ func stall(cycles int64) {
 func execute() {
 	for {
 		ProgramCounter := getRegister(0x001a)
-		op := Memory[ProgramCounter]
-
+		op := Mapper(ProgramCounter)
+	
 		if ProgramCounter == 0x0000 {
-			setRegister(0x001a, uint16(0x0003))
-			continue
-		}
-		if ProgramCounter == 0x0003 {
-			codesect := uint16(Memory[ProgramCounter])<<8 | uint16(Memory[ProgramCounter+1])
+			codesect := uint32(Mapper(ProgramCounter)) << 8 | uint32(Mapper(ProgramCounter + 1))
 			setRegister(0x001a, codesect)
 			continue
 		}
@@ -124,19 +168,27 @@ func execute() {
 			return
 		case 0x01:
 			// MOV
-			mode := Memory[ProgramCounter+1]
-			dst := Memory[ProgramCounter+2]
+			mode := Mapper(ProgramCounter + 1)
+			dst := Mapper(ProgramCounter + 2)
 
 			if mode == 0x01 {
-				imm := uint16(Memory[ProgramCounter+3])<<8 | uint16(Memory[ProgramCounter+4])
-				setRegister(uint16(dst), imm)
-				setRegister(0x001a, ProgramCounter+5)
-				Log("mov " + getRegisterName(uint16(dst)) + ", " + fmt.Sprintf("0x%04x", imm))
+				var imm uint32 = 0
+				var next uint32 = 0
+				if types.Bits32 == false {
+					imm = uint32(uint16(Memory[ProgramCounter + 3]) << 8 | uint16(Memory[ProgramCounter + 4]))
+					next = ProgramCounter + 5
+				} else {
+					imm = uint32(Memory[ProgramCounter + 3]) << 24 | uint32(Memory[ProgramCounter + 4])	<< 16 | uint32(Memory[ProgramCounter + 5]) << 8 | uint32(Memory[ProgramCounter + 6])
+					next = ProgramCounter + 7
+				}
+				setRegister(uint32(dst), imm)
+				setRegister(0x001a, next)
+				Log("mov " + getRegisterName(uint32(dst)) + ", " + fmt.Sprintf("0x%08x", imm))
 			} else if mode == 0x02 {
-				frm := uint16(Memory[ProgramCounter+3])
-				setRegister(uint16(dst), uint16(getRegister(frm)))
+				frm := uint32(Memory[ProgramCounter+3])
+				setRegister(uint32(dst), uint32(getRegister(frm)))
 				setRegister(0x001a, ProgramCounter+4)
-				Log("mov " + getRegisterName(uint16(dst)) + ", " + getRegisterName(frm))
+				Log("mov " + getRegisterName(uint32(dst)) + ", " + getRegisterName(frm))
 			}	
 			stall(4)
 		case 0x02:
@@ -150,12 +202,17 @@ func execute() {
 			// JMP	
 			mode := Memory[ProgramCounter+1]
 
-			if mode == 0x01 {	
-				loc := uint16(Memory[ProgramCounter+2])<<8 | uint16(Memory[ProgramCounter+3])
+			if mode == 0x01 {
+				var loc uint32 = 0
+				if types.Bits32 == false {
+					loc = uint32(uint16(Memory[ProgramCounter + 2]) << 8 | uint16(Memory[ProgramCounter + 3]))
+				} else {
+					loc = uint32(Memory[ProgramCounter + 2]) << 24 | uint32(Memory[ProgramCounter + 3])	<< 16 | uint32(Memory[ProgramCounter + 4]) << 8 | uint32(Memory[ProgramCounter + 5])
+				}	
 				setRegister(0x001a, loc)
-				Log("jmp " + fmt.Sprintf("0x%04x", loc))
+				Log("jmp " + fmt.Sprintf("0x%08x", loc))
 			} else if mode == 0x02 {
-				frm := uint16(Memory[ProgramCounter+2])
+				frm := uint32(Memory[ProgramCounter+2])
 				loc := getRegister(frm)	
 				setRegister(0x001a, loc)
 				Log("jmp " + getRegisterName(frm))
@@ -163,31 +220,44 @@ func execute() {
 			stall(8)
 		case 0x04:
 			// INT
-			code := uint16(Memory[ProgramCounter+1])<<8 | uint16(Memory[ProgramCounter+2])
+			var code uint32 = 0
+			var next uint32 = 0
+			if types.Bits32 == false {
+				code = uint32(uint16(Memory[ProgramCounter + 1]) << 8 | uint16(Memory[ProgramCounter + 2]))
+				next = ProgramCounter + 3
+			} else {
+				code = uint32(Memory[ProgramCounter + 1]) << 24 | uint32(Memory[ProgramCounter + 2])	<< 16 | uint32(Memory[ProgramCounter + 3]) << 8 | uint32(Memory[ProgramCounter + 4])
+				next = ProgramCounter + 5
+			}
 			bios.IntHandler(code)
-			setRegister(0x001a, ProgramCounter+3)
-			Log("int " + fmt.Sprintf("0x%04x", code))
+			setRegister(0x001a, next)
+			Log("int " + fmt.Sprintf("0x%08x", code))
 			stall(34)
 		case 0x05:
 			// JNZ
 			// jnz <mode (01 or 02)> <check register> <loc (register or raw addr)>
 			mode := Memory[ProgramCounter+1]
 			checkRegister := Memory[ProgramCounter+2]
-			var loc uint16 = 0
-			var not uint16 = 0
+			var loc uint32 = 0
+			var not uint32 = 0
 
-			if mode == 0x01 {
-				loc = uint16(Memory[ProgramCounter+3])<<8 | uint16(Memory[ProgramCounter+4])	
-				not = ProgramCounter + 5
-				Log("jnz " + getRegisterName(uint16(checkRegister)) + ", " + fmt.Sprintf("0x%04x", loc))
+			if mode == 0x01 {	
+				if types.Bits32 == false {
+					loc = uint32(uint16(Memory[ProgramCounter + 3]) << 8 | uint16(Memory[ProgramCounter + 4]))
+					not = ProgramCounter + 5
+				} else {
+					loc = uint32(Memory[ProgramCounter + 3]) << 24 | uint32(Memory[ProgramCounter + 4])	<< 16 | uint32(Memory[ProgramCounter + 5]) << 8 | uint32(Memory[ProgramCounter + 6])
+					not = ProgramCounter + 7
+				}	
+				Log("jnz " + getRegisterName(uint32(checkRegister)) + ", " + fmt.Sprintf("0x%08x", loc))
 			} else if mode == 0x02 {
-				frm := uint16(Memory[ProgramCounter+3])
+				frm := uint32(Memory[ProgramCounter+3])
 				loc = getRegister(frm)
 				not = ProgramCounter + 4
-				Log("jnz " + getRegisterName(uint16(checkRegister)) + ", " + getRegisterName(frm))
+				Log("jnz " + getRegisterName(uint32(checkRegister)) + ", " + getRegisterName(frm))
 			}
 
-			if getRegister(uint16(checkRegister)) != 0 {
+			if getRegister(uint32(checkRegister)) != 0 {
 				setRegister(0x001a, loc)
 			} else {
 				setRegister(0x001a, not)
@@ -204,12 +274,12 @@ func execute() {
 			to := Memory[ProgramCounter+1]
 			first := Memory[ProgramCounter+2]
 			second := Memory[ProgramCounter+3]
-			Log("cmp " + getRegisterName(uint16(to)) + ", " + getRegisterName(first) + ", " + getRegisterName(second))
+			Log("cmp " + getRegisterName(uint32(to)) + ", " + getRegisterName(first) + ", " + getRegisterName(second))
 
-			if getRegister(uint16(first)) == getRegister(uint16(second)) {
-				setRegister(uint16(to), uint16(1))
+			if getRegister(uint32(first)) == getRegister(uint32(second)) {
+				setRegister(uint32(to), uint32(1))
 			} else {
-				setRegister(uint16(to), uint16(0))
+				setRegister(uint32(to), uint32(0))
 			}
 			setRegister(0x001a, ProgramCounter+4)
 			stall(4)
@@ -218,21 +288,26 @@ func execute() {
 			// jz <mode (01 or 02)> <check register> <loc (register or raw addr)>
 			mode := Memory[ProgramCounter+1]
 			checkRegister := Memory[ProgramCounter+2]
-			var loc uint16 = 0
-			var not uint16 = 0
+			var loc uint32 = 0
+			var not uint32 = 0
 
-			if mode == 0x01 {
-				loc = uint16(Memory[ProgramCounter+3])<<8 | uint16(Memory[ProgramCounter+4])
-				not = ProgramCounter + 5
-				Log("jz " + getRegisterName(checkRegister) + ", " + fmt.Sprintf("0x%04x", loc))
+			if mode == 0x01 {	
+				if types.Bits32 == false {
+					loc = uint32(uint16(Mapper(ProgramCounter + 3)) << 8 | uint16(Mapper(ProgramCounter + 4)))
+					not = ProgramCounter + 5
+				} else {
+					loc = uint32(Mapper(ProgramCounter + 3)) << 24 | uint32(Mapper(ProgramCounter + 4))	<< 16 | uint32(Mapper(ProgramCounter + 5)) << 8 | uint32(Mapper(ProgramCounter + 6))
+					not = ProgramCounter + 7
+				}	
+				Log("jz " + getRegisterName(checkRegister) + ", " + fmt.Sprintf("0x%08x", loc))
 			} else if mode == 0x02 {
-				frm := uint16(Memory[ProgramCounter+3])
+				frm := uint32(Memory[ProgramCounter+3])
 				loc = getRegister(frm)
 				not = ProgramCounter + 4
 				Log("jz " + getRegisterName(checkRegister) + ", " + getRegisterName(frm))
 			}
 
-			if getRegister(uint16(checkRegister)) == 0 {
+			if getRegister(uint32(checkRegister)) == 0 {
 				setRegister(0x001a, loc)
 			} else {
 				setRegister(0x001a, not)
@@ -241,7 +316,7 @@ func execute() {
 		case 0x09:
 			// INC
 			// inc <register>
-			register := uint16(Memory[ProgramCounter+1])
+			register := uint32(Memory[ProgramCounter+1])
 			setRegister(register, getRegister(register)+1)
 			setRegister(0x001a, ProgramCounter+2)
 			Log("inc " + getRegisterName(register))
@@ -249,7 +324,7 @@ func execute() {
 		case 0x0a:
 			// DEC
 			// dec <register>
-			register := uint16(Memory[ProgramCounter+1])
+			register := uint32(Memory[ProgramCounter+1])
 			setRegister(register, getRegister(register)-1)
 			setRegister(0x001a, ProgramCounter+2)
 			Log("dec " + getRegisterName(register))
@@ -258,32 +333,53 @@ func execute() {
 			// PUSH
 			// push <mode> <immediate or register>
 			mode := Memory[ProgramCounter + 1]
-			var value uint16	
-			if mode == 0x1 {
-				value = uint16(Memory[ProgramCounter + 2]) << 8 | uint16(Memory[ProgramCounter + 3])
-				setRegister(0x001a, ProgramCounter + 4)
-				Log("push " + fmt.Sprintf("0x%04x", value))
+			var value uint32	
+			if mode == 0x1 {	
+				var next uint32 = 0
+				if types.Bits32 == false {
+					value = uint32(uint16(Mapper(ProgramCounter + 2)) << 8 | uint16(Mapper(ProgramCounter + 3)))
+					next = ProgramCounter + 4
+				} else {
+					value = uint32(Mapper(ProgramCounter + 2)) << 24 | uint32(Mapper(ProgramCounter + 3))	<< 16 | uint32(Mapper(ProgramCounter + 4)) << 8 | uint32(Mapper(ProgramCounter + 5))
+					next = ProgramCounter + 6
+				}	
+				setRegister(0x001a, next)
+				Log("push " + fmt.Sprintf("0x%08x", value))
 			} else if mode == 0x2 {
-				value = getRegister(uint16(Memory[ProgramCounter + 2]))
+				value = getRegister(uint32(Mapper(ProgramCounter + 2)))
 				setRegister(0x001a, ProgramCounter + 3)
-				Log("push " + getRegisterName(uint16(Memory[ProgramCounter + 2])))
+				Log("push " + getRegisterName(uint32(Mapper(ProgramCounter + 2))))
 			}	
 			sp := getRegister(0x0019)
-			sp += 2
-			Memory[video.Clamp(sp, 0, 65534)] = byte(value & 0xFF)
-			Memory[video.Clamp(sp + 1, 0, 65534)] = byte(value >> 8)	
-			setRegister(0x0019, uint16(sp))	
+			if types.Bits32 == false {
+				sp = video.Clamp(sp - 2, 0, MEMCAP)
+			} else {
+				sp = video.Clamp(sp - 4, 0, MEMCAP)
+			}
+			Memory[MapperIndex(sp)] = byte(value & 0xFF)
+			Memory[MapperIndex(sp + 1)] = byte(value >> 8)	
+			setRegister(0x0019, uint32(sp))	
 			stall(2)
 		case 0x0c:
 			// POP
 			// pop <register>	
-			register := Memory[ProgramCounter+1]
+			register := Mapper(ProgramCounter + 1)
 			sp := getRegister(0x0019)
-			value := uint16(Memory[sp]) | uint16(Memory[sp+1])<<8
-			setRegister(uint16(register), uint16(value))
-			sp -= 2	
-			setRegister(0x0019, uint16(sp))
-			setRegister(0x001a, ProgramCounter+2)
+			var value uint32
+			if types.Bits32 == false {
+				value = uint32(uint16(Mapper(sp)) | uint16(Mapper(sp + 1)) << 8) 
+			} else {	
+				value = uint32(Mapper(sp)) | uint32(Mapper(sp + 1)) << 8 | uint32(Mapper(sp + 2)) << 16 | uint32(Mapper(sp + 3))
+			}
+			Log("value: " + fmt.Sprintf("0x%08x", value))
+			setRegister(uint32(register), uint32(value))
+			if types.Bits32 == false {
+				sp = video.Clamp(sp + 2, 0, MEMCAP)
+			} else {
+				sp = video.Clamp(sp + 4, 0, MEMCAP)
+			}
+			setRegister(0x0019, uint32(sp))
+			setRegister(0x001a, ProgramCounter + 2)
 			Log("pop " + getRegisterName(register))
 			stall(2)
 		case 0x0d:
@@ -292,7 +388,7 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			setRegister(uint16(toregister), getRegister(uint16(regone))+getRegister(uint16(regtwo)))
+			setRegister(uint32(toregister), getRegister(uint32(regone))+getRegister(uint32(regtwo)))
 			setRegister(0x001a, ProgramCounter+4)
 			Log("add " + getRegisterName(toregister) + ", " + getRegisterName(regone) + ", " + getRegisterName(regtwo))
 			stall(7)
@@ -302,7 +398,7 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			setRegister(uint16(toregister), getRegister(uint16(regone))-getRegister(uint16(regtwo)))
+			setRegister(uint32(toregister), getRegister(uint32(regone))-getRegister(uint32(regtwo)))
 			setRegister(0x001a, ProgramCounter+4)
 			Log("sub " + getRegisterName(toregister) + ", " + getRegisterName(regone) + ", " + getRegisterName(regtwo))
 			stall(7)
@@ -312,7 +408,7 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			setRegister(uint16(toregister), getRegister(uint16(regone))*getRegister(uint16(regtwo)))
+			setRegister(uint32(toregister), getRegister(uint32(regone))*getRegister(uint32(regtwo)))
 			setRegister(0x001a, ProgramCounter+4)
 			Log("mul " + getRegisterName(toregister) + ", " + getRegisterName(regone) + ", " + getRegisterName(regtwo))
 			stall(70)
@@ -322,7 +418,7 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			setRegister(uint16(toregister), getRegister(uint16(regone))/getRegister(uint16(regtwo)))
+			setRegister(uint32(toregister), getRegister(uint32(regone))/getRegister(uint32(regtwo)))
 			setRegister(0x001a, ProgramCounter+4)
 			Log("div " + getRegisterName(toregister) + ", " + getRegisterName(regone) + ", " + getRegisterName(regtwo))
 			stall(140)
@@ -332,10 +428,10 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			if getRegister(uint16(regone)) > getRegister(uint16(regtwo)) {
-				setRegister(uint16(toregister), uint16(1))
+			if getRegister(uint32(regone)) > getRegister(uint32(regtwo)) {
+				setRegister(uint32(toregister), uint32(1))
 			} else {
-				setRegister(uint16(toregister), uint16(0))
+				setRegister(uint32(toregister), uint32(0))
 			}
 			setRegister(0x001a, ProgramCounter + 4)
 			Log("igt " + getRegisterName(toregister) + ", " + getRegisterName(regone) + ", " + getRegisterName(regtwo))
@@ -346,10 +442,10 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			if getRegister(uint16(regone)) < getRegister(uint16(regtwo)) {
-				setRegister(uint16(toregister), uint16(1))
+			if getRegister(uint32(regone)) < getRegister(uint32(regtwo)) {
+				setRegister(uint32(toregister), uint32(1))
 			} else {
-				setRegister(uint16(toregister), uint16(0))
+				setRegister(uint32(toregister), uint32(0))
 			}
 			setRegister(0x001a, ProgramCounter + 4)
 			Log("ilt " + getRegisterName(toregister) + ", " + getRegisterName(regone) + ", " + getRegisterName(regtwo))
@@ -360,7 +456,7 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			setRegister(uint16(toregister), getRegister(uint16(regone)) & getRegister(uint16(regtwo)))	
+			setRegister(uint32(toregister), getRegister(uint32(regone)) & getRegister(uint32(regtwo)))	
 			setRegister(0x001a, ProgramCounter + 4)
 			Log("and " + getRegisterName(toregister) + ", " + getRegisterName(regone) + ", " + getRegisterName(regtwo))
 			stall(1)
@@ -370,7 +466,7 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			setRegister(uint16(toregister), getRegister(uint16(regone)) | getRegister(uint16(regtwo)))	
+			setRegister(uint32(toregister), getRegister(uint32(regone)) | getRegister(uint32(regtwo)))	
 			setRegister(0x001a, ProgramCounter + 4)
 			Log("or " + getRegisterName(toregister) + ", " + getRegisterName(regone) + ", " + getRegisterName(regtwo))
 			stall(1)
@@ -380,7 +476,7 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			setRegister(uint16(toregister), ^(getRegister(uint16(regone)) | getRegister(uint16(regtwo))))	
+			setRegister(uint32(toregister), ^(getRegister(uint32(regone)) | getRegister(uint32(regtwo))))	
 			setRegister(0x001a, ProgramCounter + 4)
 			Log("nor " + getRegisterName(toregister) + ", " + getRegisterName(regone) + ", " + getRegisterName(regtwo))
 			stall(3)
@@ -389,7 +485,7 @@ func execute() {
 			// not <register> <register>
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
-			setRegister(uint16(uint16(toregister)), ^getRegister(uint16(regone)))	
+			setRegister(uint32(uint32(toregister)), ^getRegister(uint32(regone)))	
 			setRegister(0x001a, ProgramCounter + 3)
 			Log("not " + getRegisterName(toregister) + ", " + getRegisterName(regone))
 			stall(1)
@@ -399,41 +495,64 @@ func execute() {
 			toregister := Memory[ProgramCounter+1]
 			regone := Memory[ProgramCounter+2]
 			regtwo := Memory[ProgramCounter+3]
-			setRegister(uint16(toregister), getRegister(uint16(regone)) ^ getRegister(uint16(regtwo)))	
+			setRegister(uint32(toregister), getRegister(uint32(regone)) ^ getRegister(uint32(regtwo)))	
 			setRegister(0x001a, ProgramCounter + 4)
 			Log("xor " + getRegisterName(toregister) + ", " + getRegisterName(regone) + ", " + getRegisterName(regtwo))
 			stall(6)
 		case 0x18:
 			// LOD
 			// lod <addr (register)> <destination register>	
-			addr := getRegister(uint16(Memory[ProgramCounter+1]))
-			toregister := uint16(Memory[ProgramCounter+2])
-			setRegister(toregister, uint16(Memory[video.Clamp(addr, 0, 65534)]))
+			addr := getRegister(uint32(Memory[ProgramCounter+1]))
+			toregister := uint32(Memory[ProgramCounter+2])
+			setRegister(toregister, uint32(Memory[video.Clamp(addr, 0, MEMCAP)]))
 			setRegister(0x001a, ProgramCounter + 3)
-			Log("lod " + getRegisterName(uint16(Memory[ProgramCounter + 1])) + ", " + getRegisterName(toregister))
+			Log("lod " + getRegisterName(uint32(Memory[ProgramCounter + 1])) + ", " + getRegisterName(toregister))
 			stall(100)
 		case 0x19:
 			// STR
 			// str <addr (register)> <value (register)>	
-			addr := getRegister(uint16(Memory[ProgramCounter+1]))
-			value := uint16(Memory[ProgramCounter+2])
-			Memory[video.Clamp(addr, 0, 65534)] = byte(getRegister(value) >> 8)
-			Memory[video.Clamp(addr + 1, 0, 65534)] = byte(getRegister(value) & 0xFF)
+			addr := getRegister(uint32(Memory[ProgramCounter+1]))
+			value := uint32(Memory[ProgramCounter+2])
+			if types.Bits32 == false {
+				Memory[video.Clamp(addr, 0, MEMCAP)] = byte(getRegister(value) >> 8)
+				Memory[video.Clamp(addr + 1, 0, MEMCAP)] = byte(getRegister(value) & 0xFF)
+			} else {
+				Memory[video.Clamp(addr, 0, MEMCAP)] = byte(getRegister(value) >> 24)
+				Memory[video.Clamp(addr + 1, 0, MEMCAP)] = byte(getRegister(value) >> 16)
+				Memory[video.Clamp(addr + 2, 0, MEMCAP)] = byte(getRegister(value) >> 8)
+				Memory[video.Clamp(addr + 3, 0, MEMCAP)] = byte(getRegister(value) & 0xFF)
+			}	
 			setRegister(0x001a, ProgramCounter + 3)
-			Log("str " + getRegisterName(uint16(Memory[ProgramCounter + 1])) + ", " + getRegisterName(value))
+			Log("str " + getRegisterName(uint32(Memory[ProgramCounter + 1])) + ", " + getRegisterName(value))
 			stall(100)
-		case 0x20:
-			// LODW
-			// lodw <addr (register)> <destination register>
-			addr := getRegister(uint16(Memory[ProgramCounter+1]))
-			toregister := uint16(Memory[ProgramCounter+2])
-			setRegister(toregister, uint16(Memory[video.Clamp(addr, 0, 65534)]) << 8 | uint16(Memory[video.Clamp(addr + 1, 0, 65534)]))
+		case 0x1a:
+			// LODF
+			// lodf <addr (register)> <destination register>
+			addr := getRegister(uint32(Memory[ProgramCounter+1]))
+			toregister := uint32(Memory[ProgramCounter+2])
+			if types.Bits32 == false {
+				setRegister(toregister, uint32(uint16(Memory[video.Clamp(addr, 0, MEMCAP)]) << 8 | uint16(Memory[video.Clamp(addr + 1, 0, MEMCAP)])))
+			} else {
+				setRegister(toregister, uint32(Memory[video.Clamp(addr, 0, MEMCAP)]) << 24 | uint32(Memory[video.Clamp(addr + 1, 0, MEMCAP)]) << 16 | uint32(Memory[video.Clamp(addr + 2, 0, MEMCAP)]) << 8 | uint32(Memory[video.Clamp(addr + 3, 0, MEMCAP)]) << 16)
+			}
 			setRegister(0x001a, ProgramCounter + 3)
-			Log("lodw " + getRegisterName(uint16(Memory[ProgramCounter + 1])) + ", " + getRegisterName(toregister))
+			Log("lodw " + getRegisterName(uint32(Memory[ProgramCounter + 1])) + ", " + getRegisterName(toregister))
 			stall(100)
+		case 0x1b:
+			// SET
+			// set <00 or 01>
+			mode := uint32(Memory[ProgramCounter + 1])
+			if mode == 0 {
+				types.Bits32 = false
+				Log("16 bit mode")
+			} else if mode == 1 {
+				types.Bits32 = true
+				Log("32 bit mode")
+			}
+			setRegister(0x001a, ProgramCounter + 2)
 		default:
-			setRegister(0x0001, uint16(op))
-			Log("\033[31mIllegal instruction 0x" + fmt.Sprintf("%04x", uint16(op)) + "\033[33m")
+			setRegister(0x0001, uint32(op))
+			Log("\033[31mIllegal instruction 0x" + fmt.Sprintf("%08x", uint32(op)) + "\033[33m")
 			bios.IntHandler(0x7)	
 			if Debug == true {
 				setRegister(0x001a, ProgramCounter + 1)
@@ -508,7 +627,7 @@ func WindowManage(window *app.Window) error {
 							char = keyboard.Upper(char)
 						}
 	
-    					setRegister(0x001b, uint16(rune(char[0])))
+    					setRegister(0x001b, uint32(rune(char[0])))
     					bios.IntHandler(bios.KeyInterruptCode)
 					}
 				}
@@ -539,7 +658,7 @@ func WindowManage(window *app.Window) error {
 			paint.PaintOp{}.Add(GTX.Ops)	
 			E.Frame(GTX.Ops)
 			Ready = true
-			time.Sleep(time.Duration(150))
+			time.Sleep(time.Duration(150) * time.Millisecond)
 			window.Invalidate()
 		}
 	}
@@ -580,8 +699,7 @@ func main() {
 		if bios.CheckArgs() == false {
 			return
 		}
-
-		filename := ""
+	
 		for i := 1; i < len(os.Args); i++ {
 			arg := os.Args[i]
 			switch arg {
@@ -601,31 +719,16 @@ func main() {
 				Debug = true
 				LogOn = true
 			default:
-				filename = arg
+				Filename = arg
 			}
 		}
 
-		if filename == "" {
+		if Filename == "" {
 			bios.WriteLine("No bootable device", 255, 0)
 			return
-		}
-	
-		data, err := os.ReadFile(filename)
-		if err != nil {
-			fmt.Println("luna-l2: Could not open '" + filename + "'")
-			os.Exit(1)
 		}	
 
-		if len(data) > 65535 {
-			bios.WriteLine("FATAL: Disk image too large (max 64KiB)", 255, 0)	
-			return
-		}	
-
-		copy(Memory[:], data)
-		if bios.CheckImage() == false {
-			return	
-		}
-		setRegister(0x0019, uint16(len(data)))
+		LoadSector(0, true)	
 		execute()
 	}()	
 	InitializeWindow()

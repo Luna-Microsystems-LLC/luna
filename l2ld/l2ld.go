@@ -16,7 +16,6 @@ var DataBuffer []byte
 var TextBuffer []byte
 var ExtendedDataBuffer []byte
 var section string = "text"
-var libs = map[string]string {}
 
 var bindings = []binding {}
 
@@ -24,11 +23,10 @@ var errors = []string {
 	"no object files specified",
 	"file cannot be open()ed, errno=2",
 	"multiple definitions of",
-	"Undefined symbol for architecture luna-l2:",
-	"unable to load list of libraries",
+	"Undefined symbol for architecture luna-l2:",	
 }
 func error(errno int, args string) {
-	fmt.Println("l2ld: " + errors[errno] + " " + args)
+	fmt.Fprintln(os.Stderr, "l2ld: " + errors[errno] + " " + args)
 	os.Exit(1)
 }
 
@@ -65,9 +63,7 @@ func separate(data []byte) {
 				i += 2
 			case 0xC2807F:
 				section = "edata"
-				i += 2
-			case 0x4C324F: // File magic number, ignore it
-				i += 2
+				i += 2	
 			default:
 				write(data[i])
 			}
@@ -81,37 +77,56 @@ func link() {
 	collect := func(buffer *[]byte, offset int) {	
 		data := *buffer
 		for i := 0; i < len(data); i++ {
-			if bytes.HasPrefix(data[i:], []byte("LD_")) {
-				j := i + 3
+			if bytes.HasPrefix(data[i:], []byte("LD16_")) || bytes.HasPrefix(data[i:], []byte("LD32_")) {
+				var Bits32 bool = false
+				if bytes.HasPrefix(data[i:], []byte("LD32_")) {
+					Bits32 = true
+				}
+
+				j := i + 5
 				for j < len(data) && data[j] != 0x00 {
 					j++
 				}
-				name := string(data[i + 3:j])
+				name := string(data[i + 5:j])
 
 				old := len(data)
 				data = append(data[:i], data[j + 1:]...)
 				RSF := old - len(data)
 
-				location := (i + offset) 
-				H := byte(location >> 8)	
-				L := byte(location & 0xFF)
-
-				AH := byte((location - (j - i + 3) - RSF) >> 8)
-				AL := byte((location - (j - i + 3) - RSF) & 0xFF)
+				location := (i + offset)
 
 				_, ok := checkBinding(name)
 				if ok != false {
 					error(2, "`" + name + "'")
 				}
-				bindings = append(bindings, binding{Name: name, Location: []byte{H, L}})
-				data = append(bytes.ReplaceAll(data[:i], append([]byte("LR_" + name), 0x00), []byte{AH, AL}), data[i:]...)
+
+				if Bits32 == false {
+					H := byte(location >> 8)	
+					L := byte(location & 0xFF)
+					AH := byte((location - (j - i + 5) - RSF) >> 8)
+					AL := byte((location - (j - i + 5) - RSF) & 0xFF)
+					bindings = append(bindings, binding{Name: name, Location: []byte{H, L}})
+					data = append(bytes.ReplaceAll(data[:i], append([]byte("LR_" + name), 0x00), []byte{AH, AL}), data[i:]...)
+				} else {
+					HH := byte(location >> 24)
+					HL := byte(location >> 16)
+					LH := byte(location >> 8)
+					LL := byte(location & 0xFF)
+
+					AHH := byte((location - (j - i + 5) - RSF) >> 24)
+					AHL := byte((location - (j - i + 5) - RSF) >> 16)
+					ALH := byte((location - (j - i + 5) - RSF) >> 8)
+					ALL := byte((location - (j - i + 5) - RSF) & 0xFF)
+					bindings = append(bindings, binding{Name: name, Location: []byte{HH, HL, LH, LL}})
+					data = append(bytes.ReplaceAll(data[:i], append([]byte("LR_" + name), 0x00), []byte{AHH, AHL, ALH, ALL}), data[i:]...)
+				}
 			} 
 		}
 		*buffer = data
 	}
-	collect(&DataBuffer, 3 + 2)
-	collect(&TextBuffer, 3 + 2 + len(DataBuffer))
-	collect(&ExtendedDataBuffer, 3 + 2 + len(DataBuffer) + len(TextBuffer))
+	collect(&DataBuffer, 2)
+	collect(&TextBuffer, 2 + len(DataBuffer))
+	collect(&ExtendedDataBuffer, 2 + len(DataBuffer) + len(TextBuffer))
 
 	for _, b := range bindings {
 		ref := append([]byte("LR_" + b.Name), 0x00)
@@ -121,29 +136,11 @@ func link() {
 	}
 }
 
-func collectLibs() {
-	content, err := os.ReadFile("/usr/local/lib/lcc/libs.conf")
-	if err != nil {
-		error(4, "")
-		return
-	}
-	content_str := string(content)
-
-	words := strings.Fields(content_str)
-	for i := 0; i < len(words); i++ {
-		word := words[i]
-		nextword := words[i + 1]
-		libs[word] = nextword
-		i++
-	}	
-}
-
 func main() {
 	if len(os.Args) < 2 {
 		error(0, "")
 	}
 
-	collectLibs()
 	var input_files []string
 	var output_filename string = ""
 
@@ -164,17 +161,18 @@ func main() {
 		}
 	}
 
+	if len(input_files) < 1 {
+		error(0, "")
+	}
 	if output_filename == "" {
 		output_filename = "a.bin"
 	}
 
-beginning:
 	for _, file := range input_files {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			error(1, "path=" + file)
-		}	
-
+		}
 		separate(data)		
 	}
 
@@ -183,9 +181,8 @@ beginning:
 	if found == false {
 		error(3, "\n  \"_start\", referenced from\n    <initial-undefines>")	
 	}
-
-	buffer := append([]byte{}, []byte{0x4c, 0x32, 0x45}...)
-	buffer = append(buffer, startloc...) 
+	
+	buffer := append([]byte{}, startloc...) 
 	buffer = append(buffer, DataBuffer...)
 	buffer = append(buffer, TextBuffer...)
 	buffer = append(buffer, ExtendedDataBuffer...)
@@ -201,20 +198,7 @@ beginning:
 			}
 		}
 		name = strings.TrimPrefix(name, "LR_")
-
-		if libs[name] != "" {
-			input_files = append(input_files, libs[name])
-
-			// Reset
-			DataBuffer = []byte {}
-			TextBuffer = []byte {}
-			ExtendedDataBuffer = []byte {}
-			bindings = []binding {}
-			section = "text"
-			goto beginning
-		} else {
-			error(3, "\n  \"" + name + "\", referenced from\n    <initial-undefines>")
-		}
+		error(3, "\n  \"" + name + "\", referenced from\n    <initial-undefines>")
 	}
 	os.WriteFile(output_filename, []byte(buffer), 0644)
 }

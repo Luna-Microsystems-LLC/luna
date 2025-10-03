@@ -1,7 +1,9 @@
 package types
 
 type Register struct {
-	Address uint16
+	Address uint32
 	Name    string
-	Value   uint16
+	Value   uint32
 }
+
+var Bits32 bool = false

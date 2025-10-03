@@ -10,7 +10,6 @@ require (
 require (
 	gioui.org/shader v1.0.8 // indirect
 	github.com/go-text/typesetting v0.2.1 // indirect
-	github.com/hajimehoshi/go-mp3 v0.3.0 // indirect
 	github.com/hajimehoshi/oto v0.7.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	golang.org/x/exp v0.0.0-20240707233637-46b078467d37 // indirect

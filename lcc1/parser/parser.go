@@ -79,6 +79,31 @@ func LookupVariable(Name string, Enforce bool) Variable_Dynamic {
 	}
 }
 
+func StringParse(tokens []lexer.Token, start int) (string, int) {
+	// Start would be the first token
+	var str string = ""
+	var loc int = 0
+	if strings.HasSuffix(tokens[start].Value, "\"") {
+		tokens[start].Value = strings.Trim(tokens[start].Value, "\"")
+		str = tokens[start].Value
+		loc = start
+	} else {
+		var strtokens = []string { tokens[start].Value }
+		for k := start + 1; k < len(tokens); k++ {
+			strtokens = append(strtokens, tokens[k].Value)
+			if strings.HasSuffix(tokens[k].Value, "\"") {
+				start = k
+				break
+			}
+		}
+		str = strings.Join(strtokens, " ")
+		str = strings.Trim(str,  "\"")
+		loc = start
+	}
+	
+	return str, loc
+}
+
 func Parse(tokens []lexer.Token) {
 	i := 0
 	expect := func(toktype lexer.TokenType) string {
@@ -99,110 +124,123 @@ func Parse(tokens []lexer.Token) {
 		return tokens[i + lookahead]
 	}
 	
-	switch level {
-	case 0:
-		_type := expect(lexer.TokType)
-		name := expect(lexer.TokIdent)
-		
-		var rtype int
-		if _type == "int" {
-			rtype = NUMBER
+	for {
+		if i >= len(tokens) {
+			break
 		}
-
-		if LookupVariable(name, false).Name != "__ZERO" {
-			// print(LookupVariable(name, false).Name)
-			error.Error(3, "'" + name + "'")
-		}
-
-		CreateDynamic(name, rtype, 0, 2)
-
-		expect(lexer.TokLParen)
-		expect(lexer.TokRParen)
-		expect(lexer.TokLCurly)
-
-		var Children = []lexer.Token {}
-		ending := -1
-		for j := i; j < len(tokens); j++ {
-			if tokens[j].Type == lexer.TokRCurly {
-				ending = j
-				break
-			} else {	
-				Children = append(Children, tokens[j])
-			}
-		}
-		if ending == -1 {
-			error.Error(2, "'}'")
-		} else {
-			i = ending
-		}
-	
-		expect(lexer.TokRCurly)
-
-		if name == "main" {
-			name = "_start"
-		}
-		Write(name + ":", false)
-		if len(Children) > 0 {
-			level = 1
-			Parse(Children)
-			level = 0
-		}
-		if name != "_start" {
-			Write("ret", true)
-		}
-		i++
-		if i < len(tokens) {
-			print(tokens[i].Value)
-			Parse(tokens)
-		}	
-	case 1:	
-		// Variable reassignment / function call
-		var type_ lexer.TokenType = peek(0).Type
-		switch type_ {
-		case lexer.TokIdent:
+		switch level {
+		case 0:
+			_type := expect(lexer.TokType)
 			name := expect(lexer.TokIdent)
-			if peek(0).Type == lexer.TokLParen {	
+			
+			var rtype int
+			if _type == "int" {
+				rtype = NUMBER
+			}
+
+			if LookupVariable(name, false).Name != "__ZERO" {
+				// print(LookupVariable(name, false).Name)
+				error.Error(3, "'" + name + "'")
+			}
+
+			CreateDynamic(name, rtype, 0, 2)
+
+			if peek(0).Type == lexer.TokLParen {
 				expect(lexer.TokLParen)
-				var expComma bool = false
+				expect(lexer.TokRParen)
+				expect(lexer.TokLCurly)
+
+				var Children = []lexer.Token {}
+				ending := -1
 				for j := i; j < len(tokens); j++ {
-					if tokens[j].Type == lexer.TokRParen {
-						i = j
+					if tokens[j].Type == lexer.TokRCurly {
+						ending = j
 						break
-					} else {
-						if expComma == true {
-							if tokens[j].Type != lexer.TokComma {
-								error.Error(2, "','")
-							} else {
-								expComma = false
-								continue
+					} else {	
+						Children = append(Children, tokens[j])
+					}
+				}
+				if ending == -1 {
+					error.Error(2, "'}'")
+				} else {
+					i = ending
+				}
+			
+				expect(lexer.TokRCurly)
+
+				if name == "main" {
+					name = "_start"
+				}
+				Write(name + ":", false)
+				if len(Children) > 0 {
+					level = 1
+					Parse(Children)
+					level = 0
+				}
+				if name != "_start" {
+					Write("ret", true)
+				}
+				i++
+				if i < len(tokens) {
+					print(tokens[i].Value)
+					Parse(tokens)
+				}
+			} else if peek(0).Type == lexer.TokEqual {
+				
+			} else {
+				error.Error(1, "'" + peek(0).Value + "'")
+			}
+		case 1:	
+			// Variable reassignment / function call
+			var type_ lexer.TokenType = peek(0).Type
+			switch type_ {
+			case lexer.TokIdent:
+				name := expect(lexer.TokIdent)
+				if peek(0).Type == lexer.TokLParen {	
+					expect(lexer.TokLParen)
+					var expComma bool = false
+					for j := i; j < len(tokens); j++ {
+						if tokens[j].Type == lexer.TokRParen {
+							i = j
+							break
+						} else {
+							if expComma == true {
+								if tokens[j].Type != lexer.TokComma {
+									error.Error(2, "','")
+								} else {
+									expComma = false
+									continue
+								}
 							}
-						}
-						if strings.HasPrefix(tokens[j].Value, "\"") {
-							if strings.HasSuffix(tokens[j].Value, "\"") {
-								tokens[j].Value = strings.Trim(tokens[j].Value, "\"")
-								CreateStatic(Variable_Static{Name: "var_" + fmt.Sprintf("%d", IDCounter), Type: STRING, Value: tokens[j].Value})
+							if strings.HasPrefix(tokens[j].Value, "\"") {
+								str, end := StringParse(tokens, j)
+								j = end
+								CreateStatic(Variable_Static{Name: "var_" + fmt.Sprintf("%d", IDCounter), Type: STRING, Value: str})
 								Write("push var_" + fmt.Sprintf("%d", IDCounter), true)
 								IDCounter++
 								expComma = true
 							} else {
-
-							}	
-						} else {
-							Write("push " + tokens[j].Value, true)
-							expComma = true
+								Write("push " + tokens[j].Value, true)
+								expComma = true
+							}
 						}
 					}
-				}
 
-				expect(lexer.TokRParen)
+					expect(lexer.TokRParen)
+					expect(lexer.TokSemi)
+					Write("call " + name, true)
+				} 
+			case lexer.TokReturn:
+				expect(lexer.TokReturn)
+				name := expect(lexer.TokIdent)
 				expect(lexer.TokSemi)
-				Write("call " + name, true)
-			}
-		case lexer.TokReturn:
-			expect(lexer.TokReturn)
-			name := expect(lexer.TokIdent)
-			expect(lexer.TokSemi)
-			Write("mov t7, " + name, true)	
-		}	
+				LookupVariable(name, true)
+				Write("mov t7, " + name, true)
+			case lexer.TokSemi:
+				expect(lexer.TokSemi)
+			default:
+				error.Error(1, "'" + tokens[i].Value + "'")
+			}	
+		}
 	}
 } 

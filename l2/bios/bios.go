@@ -1,7 +1,8 @@
 package bios
 import (
 	"luna_l2/video"
-	"luna_l2/types"	
+	"luna_l2/types"
+	"luna_l2/audio"
 	"time"	
 	"os"
 	"fmt"
@@ -10,8 +11,12 @@ import (
 var TypeOut bool = false
 var KeyTrap bool = false
 var Registers *[]types.Register
-var Memory *[65535]byte
-var KeyInterruptCode uint16 = 0x5
+var Memory *[0x70000000]byte
+var KeyInterruptCode uint32 = 0x5
+const (
+	MEMSIZE uint32 = 0x70000000
+	MEMCAP uint32 = 0x6FFFFFFF
+)
 
 func WriteChar(char string, fg uint8, bg uint8) {
 	video.PrintChar(rune(char[0]), byte(fg), byte(bg))
@@ -27,16 +32,19 @@ func WriteLine(str string, fg uint8, bg uint8) {
 	WriteString(str + "\n", fg, bg)
 }
 
-func setRegister(address uint16, value uint16) {
+func setRegister(address uint32, value uint32) {
 	for i := range (*Registers) {
 		if (*Registers)[i].Address == address {
-			(*Registers)[i].Value = value
-			return
+			if types.Bits32 == false {
+				(*Registers)[i].Value = uint32(uint16(value))
+			} else {
+				(*Registers)[i].Value = value
+			}
 		}
 	}
 }
 
-func getRegister(address uint16) uint16 {
+func getRegister(address uint32) uint32 {
 	for _, register := range (*Registers) {
 		if register.Address == address {
 			return register.Value
@@ -45,7 +53,7 @@ func getRegister(address uint16) uint16 {
 	return 0x0000
 }
 
-func IntHandler(code uint16) {
+func IntHandler(code uint32) {
 	if code == 0x01 {
 		// BIOS print to screen
 		// start address in R1
@@ -57,20 +65,27 @@ func IntHandler(code uint16) {
 		// BIOS sleep
 		// seconds in R1
 		timeToSleep := getRegister(0x0001)
-		time.Sleep(time.Second * time.Duration(timeToSleep))
+		time.Sleep(time.Duration(timeToSleep) * time.Millisecond)
 	} else if code == 0x03 {
 		// BIOS write to VRAM
 		// address in R1, word in R2
 		address := getRegister(0x0001)
 		word := getRegister(0x0002)
-		video.MemoryVideo[video.Clamp(address, 0, 63999)] = byte(uint16(word) >> 8)
-		video.MemoryVideo[video.Clamp(address + 1, 0, 63999)] = byte(uint16(word) & 0xFF)
+		if types.Bits32 == false {
+			video.MemoryVideo[video.Clamp(address, 0, MEMCAP)] = byte(uint16(word) >> 8)
+			video.MemoryVideo[video.Clamp(address + 1, 0, MEMCAP)] = byte(uint16(word) & 0xFF)
+		} else {
+			video.MemoryVideo[video.Clamp(address, 0, MEMCAP)] = byte(uint32(word) >> 24)
+			video.MemoryVideo[video.Clamp(address + 1, 0, MEMCAP)] = byte(uint32(word) >> 16)
+			video.MemoryVideo[video.Clamp(address + 2, 0, MEMCAP)] = byte(uint32(word) >> 8)
+			video.MemoryVideo[video.Clamp(address + 3, 0, MEMCAP)] = byte(uint32(word) & 0xFF)
+		}
 	} else if code == 0x4 {
 		// BIOS configure input mode
 		// Mode 1: no type output
 		// Mode 2: type output
 		// In R1
-		if getRegister(0x0001) == uint16(1) {
+		if getRegister(0x0001) == 1 {
 			TypeOut = true
 		} else {
 			TypeOut = false
@@ -82,7 +97,7 @@ func IntHandler(code uint16) {
 		}
 		if KeyTrap == true {
 			KeyTrap = false
-			setRegister(uint16(0x0001), getRegister(0x001b))
+			setRegister(0x0001, getRegister(0x001b))
 		}
 	} else if code == 0x6 {
 		// BIOS wait for key
@@ -96,8 +111,30 @@ func IntHandler(code uint16) {
 			}
 		}
 	} else if code == 0x7 {
-		WriteLine("Illegal instruction 0x" + fmt.Sprintf("%04x", getRegister(0x0001)) + " at location 0x" + fmt.Sprintf("%04x", getRegister(0x001a)), 255, 0)
+		WriteLine("Illegal instruction 0x" + fmt.Sprintf("%08x", getRegister(0x0001)) + " at location 0x" + fmt.Sprintf("%08x", getRegister(0x001a)), 255, 0)
 		return
+	} else if code == 0x8 {
+		// BIOS write to ARAM
+		// address in R1, word in R2
+		address := getRegister(0x0001)
+		word := getRegister(0x0002)
+		if types.Bits32 == false {
+			audio.MemoryAudio[video.Clamp(address, 0, MEMCAP)] = byte(uint16(word) >> 8)
+			audio.MemoryAudio[video.Clamp(address + 1, 0, MEMCAP)] = byte(uint16(word) & 0xFF)
+		} else {
+			audio.MemoryAudio[video.Clamp(address, 0, MEMCAP)] = byte(uint32(word) >> 24)
+			audio.MemoryAudio[video.Clamp(address + 1, 0, MEMCAP)] = byte(uint32(word) >> 16)
+			audio.MemoryAudio[video.Clamp(address + 2, 0, MEMCAP)] = byte(uint32(word) >> 8)
+			audio.MemoryAudio[video.Clamp(address + 3, 0, MEMCAP)] = byte(uint32(word) & 0xFF)
+		}	
+	} else if code == 0x9 {
+		audio.Play()
+	} else if code == 0xa {
+		if types.Bits32 == false {
+			setRegister(0x0001, 0xffff)
+		} else {
+			setRegister(0x0001, MEMSIZE)
+		}
 	}
 }
 
@@ -105,14 +142,6 @@ func Splash() {
 	WriteLine("Luna L2", 255, 0)
 	WriteLine("BIOS: Integrated BIOS", 255, 0)	
 	WriteLine("Copyright (c) 2025 Luna Microsystems LLC\n", 255, 0)
-}
-
-func CheckImage() bool {
-	if (*Memory)[0x0000] != 0x4C || (*Memory)[0x0001] != 0x32 || (*Memory)[0x0002] != 0x45 {
-		WriteLine("Invalid disk image", 255, 0)	
-		return false
-	}
-	return true
 }
 
 func CheckArgs() bool {

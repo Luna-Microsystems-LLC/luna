@@ -46,4 +46,4 @@ clean:
 	rm -f /usr/local/bin/las
 	rm -f /usr/local/bin/lcc1
 	rm -f /usr/local/bin/lcc
-	rm -f /usr/local/bin/lld
+	rm -f /usr/local/bin/l2ld

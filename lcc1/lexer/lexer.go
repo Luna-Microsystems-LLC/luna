@@ -20,8 +20,7 @@ const (
 	TokLCurly
 	TokRCurly
 	TokLBrack
-	TokRBrack
-	TokEOF
+	TokRBrack	
 	TokSemi
 	TokPlus
 	TokMinus

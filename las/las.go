@@ -17,6 +17,8 @@ var DataBuffer []byte
 var TextBuffer []byte
 var ExtendedDataBuffer []byte
 var current_filename string = ""
+var Bits32 bool = false
+var ForcedSize int64 = 0
 
 func execute(command string) bool {
 	shell := "sh"
@@ -123,6 +125,11 @@ var errors = []string{
 	"immediate value too large",
 	"missing terminating '\"' character",
 	"expected string",
+	"invalid architecture",
+	"invalid argument to 'bits', must be 16 or 32",
+	"putting more than one character to a register may have undesirable results",
+	"expected number",
+	"unknown pragma directive",
 }
 var Errors int
 var Warnings int
@@ -136,18 +143,38 @@ func error(errno int, args string) {
 		label = "lcc"
 	}
 
-	fmt.Println("\033[1;39m" + label + ": \033[1;31merror: \033[1;39m" + errors[errno] + " " + args + "\033[0m")
+	fmt.Fprintln(os.Stderr, "\033[1;39m" + label + ": \033[1;31merror: \033[1;39m" + errors[errno] + " " + args + "\033[0m")
 	Errors++
+}
+
+func warning(errno int, args string) {
+	label := ""
+
+	if current_filename != "" {
+		label = current_filename
+	} else {
+		label = "lcc"
+	}
+
+	fmt.Println("\033[1;39m" + label + ": \033[1;33mwarning: \033[1;39m" + errors[errno] + " " + args + "\033[0m")
+	Warnings++
 }
 
 func parse(text string) []byte {
 	// Check for number
 	if _, err := strconv.ParseInt(text, 0, 64); err == nil {
 		num, _ := strconv.ParseInt(text, 0, 64)
-
-		high := byte(num >> 8)
-		low := byte(num & 0xFF)
-		return []byte{high, low}
+		if Bits32 == false {
+			H := byte(num >> 8)
+			L := byte(num & 0xFF)
+			return []byte{H, L}
+		} else {
+			HH := byte(num >> 24)
+			HL := byte(num >> 16)
+			LH := byte(num >> 8)
+			LL := byte(num & 0xFF)
+			return []byte{HH, HL, LH, LL}	
+		}
 	}
 	if isRegister(text) != 0xff {	
 		return []byte{byte(isRegister(text))}
@@ -156,12 +183,35 @@ func parse(text string) []byte {
 		if string(text[len(text)-1]) != "\"" {
 			error(6, "")
 		}
+
 		text = strings.Trim(text, "\"")
-		if len(text) > 2 {
-			error(5, "'"+text+"'")
-		} else if len(text) == 1 {
-			text = string(byte(00)) + text
-		}
+
+		text = strings.ReplaceAll(text, "\\0", "\000")
+		text = strings.ReplaceAll(text, "\\n", "\n")
+		text = strings.ReplaceAll(text, "\\r", "\r")
+		if Bits32 == false {
+			if len(text) > 2 {
+				error(5, "'" + text + "'")
+			} else if len(text) == 1 {
+				text = string(byte(00)) + text
+			} else {
+				warning(10, "")
+			}
+		} else {
+			if len(text) > 4 {
+				error(5, "'" + text + "'")	
+			} else if len(text) == 1 {
+				text = string(byte(00)) + string(byte(00)) + string(byte(00)) + text
+			} else if len(text) == 2 {
+				text = string(byte(00)) + string(byte(00)) + text
+				warning(10, "")
+			} else if len(text) == 3 {
+				text = string(byte(00)) + text
+				warning(10, "")
+			} else {	
+				warning(10, "")
+			}
+		}	
 		return []byte(text)
 	}
 	return append([]byte("LR_"+text), 0x00)
@@ -217,7 +267,8 @@ func assemble(text string) {
 	}
 
 	for i := 0; i < len(words); i++ {
-		if words[i] == "#define" {
+		switch words[i] {
+		case "#define":
 			alias := words[i + 1]
 			actual := words[i + 2]
 			words = append(words[:i], words[i + 3:]...)
@@ -225,7 +276,21 @@ func assemble(text string) {
 				if words[j] == alias {
 					words[j] = actual
 				}
-			}	
+			}
+		case "#pragma":
+			switch words[i + 1] {
+			case "size":
+				size, err := strconv.ParseInt(words[i + 2], 0, 64)
+				if err != nil {
+					error(11, "")
+					break
+				}
+				ForcedSize = size
+				i++
+			default:
+				warning(12, "'" + words[i + 1] + "'")	
+			}
+			i++
 		}
 	}
 
@@ -240,7 +305,11 @@ func assemble(text string) {
 			}
 
 			words[i] = strings.TrimSuffix(words[i], ":")
-			write(append([]byte("LD_" + words[i]), 0x00))
+			if Bits32 == false || words[i] == "_start" {
+				write(append([]byte("LD16_" + words[i]), 0x00))
+			} else {
+				write(append([]byte("LD32_" + words[i]), 0x00))
+			}
 
 			tocompile := words[i+1 : end]
 			if len(tocompile) > 0 {
@@ -309,9 +378,15 @@ func assemble(text string) {
 			i = i + 1
 		case "int":
 			write([]byte{0x04})
-			value := parse(words[i+1])
-			if len(value) > 2 {
-				error(3, "'"+string(value)+"'")
+			value := parse(words[i+1])	
+			if Bits32 == false {
+				if len(value) > 2 {
+					error(3, "'" + string(value) + "'")
+				}
+			} else {
+				if len(value) > 4 {
+					error(3, "'" + string(value) + "'")
+				}
 			}
 			write(value)
 			i = i + 1
@@ -623,7 +698,7 @@ func assemble(text string) {
 			write([]byte{check})
 			write([]byte{one})
 			i = i + 2
-		case "lodw":
+		case "lodf":
 			check := isRegister(words[i+1])
 			one := isRegister(words[i+2])
 			if check == 0xff {
@@ -632,18 +707,37 @@ func assemble(text string) {
 			if one == 0xff {
 				error(2, "'"+words[i+2]+"'")
 			}
-			write([]byte{0x20})
+			write([]byte{0x1a})
 			write([]byte{check})
 			write([]byte{one})
 			i = i + 2
+		case "set":
+			mode := words[i + 1]
+
+			switch mode {
+			case "16":
+				write([]byte{0x1b, 0x00})
+			case "32":
+				write([]byte{0x1b, 0x01})
+			}
+			i++
 		case "call":
 			label := words[i + 1]
-			assemble(`
-			mov re1, pc
-			mov r0, 20
-			add re1, re1, r0
-			push re1
-			jmp	` + label)
+			if Bits32 == false {
+				assemble(`
+				mov re1, pc
+				mov r0, 20
+				add re1, re1, r0
+				push re1
+				jmp	` + label)
+			} else {
+				assemble(`
+				mov re1, pc
+				mov r0, 24
+				add re1, re1, r0
+				push re1
+				jmp	` + label)
+			}
 			i = i + 1
 		case "ret":
 			assemble(`jmp re1`)
@@ -715,6 +809,25 @@ func assemble(text string) {
 			value = value + string("\000")
 			write([]byte(value))
 			i = ending
+		case "bits":
+			switch words[i + 1] {
+			case "16":
+				Bits32 = false	
+			case "32":
+				Bits32 = true
+			default:
+				error(9, "")
+			}
+			i++
+		case ".embed":
+			file := words[i + 1]
+			data, err := os.ReadFile(file)
+			if err != nil {
+				error(1, "'" + file + "'")
+				continue
+			}
+			write(data)
+			i++
 		default:
 			error(4, "'"+words[i]+"'")
 		}
@@ -750,7 +863,7 @@ func main() {
 
 	var output_filename string = ""
 	var nolink bool = false
-	var object_files = []string {}
+	var object_files = []string {}	
 
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
@@ -761,13 +874,18 @@ func main() {
 			fmt.Println("Target: luna-l2")
 			os.Exit(0)
 		case "-o":
-			output_filename = os.Args[i+1]
+			output_filename = os.Args[i + 1]
 			i++
 		case "-c":
-			nolink = true
+			nolink = true	
 		default:
 			input_files = append(input_files, arg)
 		}
+	}
+
+	if len(input_files) < 1 {
+		error(0, "")
+		os.Exit(1)
 	}
 
 	if output_filename == "" {
@@ -777,6 +895,8 @@ func main() {
 			output_filename = "a.o"
 		}
 	}
+
+	var link_nocont bool = false
 
 	for _, file := range input_files {
 		data, err := os.ReadFile(file)
@@ -811,11 +931,12 @@ func main() {
 			fmt.Println(error_str)
 		}
 		if Errors > 0 {
+			link_nocont = true
 			continue
 		}
 		// Write everything
-		name, _ := splitFile(file)
-		buffer := append([]byte{0x4c, 0x32, 0x4f, 0xc2, 0x80, 0x7d}, append(DataBuffer, append([]byte{0xc2, 0x80, 0x7e}, append(TextBuffer, append([]byte{0xc2, 0x80, 0x7f}, ExtendedDataBuffer...)...)...)...)...)
+		name, _ := splitFile(file)	
+		buffer := append([]byte{0xc2, 0x80, 0x7d}, append(DataBuffer, append([]byte{0xc2, 0x80, 0x7e}, append(TextBuffer, append([]byte{0xc2, 0x80, 0x7f}, ExtendedDataBuffer...)...)...)...)...)
 		os.WriteFile(name + ".o", buffer, 0644)
 		object_files = append(object_files, name + ".o")
 		// Reset
@@ -829,6 +950,10 @@ func main() {
 
 	if nolink == true {
 		os.Exit(0)
+	}
+
+	if link_nocont == true {
+		os.Exit(1)
 	}
 
 	success := execute("l2ld " + strings.Join(object_files, " ") + " -o " + output_filename)

@@ -9,6 +9,10 @@ import (
 	"runtime"
 )
 
+func stderr(str string) {
+	fmt.Fprintln(os.Stderr, str)
+}
+
 func execute(command string, displayError bool) bool {
 	shell := "sh"
 	flag := "-c"
@@ -23,7 +27,7 @@ func execute(command string, displayError bool) bool {
 
 	if err != nil {
 		if displayError == true {
-			fmt.Println("\033[1;39mlcc: \033[1;31merror: \033[1;39compilation command failed.\033[0m")
+			stderr("\033[1;39mlcc: \033[1;31merror: \033[1;39compilation command failed.\033[0m")
 			os.Exit(1)
 		} else {
 			return false
@@ -55,7 +59,7 @@ func cleanupFiles(files []string) {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("\033[1;39mlcc: \033[1;31merror: \033[1;39mno input files\033[0m")
+		stderr("\033[1;39mlcc: \033[1;31merror: \033[1;39mno input files\033[0m")
 		os.Exit(1)
 	}
 
@@ -82,14 +86,14 @@ func main() {
 			fmt.Println("Target: luna-l2")
 			os.Exit(0)
 		case "-S":
-			noassemble = true
+			noassemble = true	
 		default:
 			input_files = append(input_files, arg)
 		}
 	}
 
 	if len(input_files) < 1 {
-		fmt.Println("\033[1;39mlcc: \033[1;31merror: \033[1;39mno input files\033[0m")
+		stderr("\033[1;39mlcc: \033[1;31merror: \033[1;39mno input files\033[0m")
 		os.Exit(1)
 	}
 
@@ -126,7 +130,7 @@ func main() {
 		case ".o":
 			object_files = append(object_files, file)
 		default:
-			fmt.Println("\033[1;39mlcc: \033[1;31merror: \033[1;39munknown file type in '" + file + "'\033[0m")
+			stderr("\033[1;39mlcc: \033[1;31merror: \033[1;39munknown file type in '" + file + "'\033[0m")
 		}
 	}
 
@@ -138,10 +142,12 @@ func main() {
 
 	for _, file := range assembly_files {
 		name, _ := splitFile(file)		
-		success := execute("las " + file + " -c -o " + name + ".o", false)
+		success := execute("las -c " + file + " -o " + name + ".o", false)
+
 		if success != true {
 			os.Exit(1)
 		}
+
 		object_files = append(object_files, name + ".o")
 		cleanup = append(cleanup, name + ".o")
 	}
@@ -155,7 +161,7 @@ func main() {
 	success := execute("l2ld " + strings.Join(object_files, " ") + " -o " + output_file, false)
 	if success != true {
 		cleanupFiles(cleanup)
-		fmt.Println("\033[1;39mlcc: \033[1;31merror: \033[1;39mlinker command failed.\033[0m")
+		stderr("\033[1;39mlcc: \033[1;31merror: \033[1;39mlinker command failed.\033[0m")
 		os.Exit(1)
 	}
 	cleanupFiles(cleanup)
